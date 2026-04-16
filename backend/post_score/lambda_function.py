@@ -1,6 +1,7 @@
 import json
 import os
 import boto3
+from datetime import datetime, timezone
 from decimal import Decimal
 
 # DynamoDB クライアント（コンテナ再利用時の接続コスト削減）
@@ -12,44 +13,44 @@ CORS_HEADERS = {
     'Access-Control-Allow-Origin': os.environ.get('ALLOW_ORIGIN', '*'),
 }
 
-DEFAULT_LIMIT = 10
-MAX_LIMIT     = 100
-
 
 def lambda_handler(event, context):
     try:
-        params = event.get('queryStringParameters') or {}
-        limit  = min(int(params.get('limit', DEFAULT_LIMIT)), MAX_LIMIT)
+        body = json.loads(event.get('body') or '{}')
 
-        # 全件スキャン → score 降順・同点は created_at 昇順でソート
-        response = table.scan()
-        items    = response.get('Items', [])
+        player_name  = str(body.get('player_name', 'ANONYMOUS')).strip()[:20]
+        new_score    = int(body.get('score', 0))
+        level_reached = int(body.get('level_reached', 1))
 
-        # ページネーション対応（件数が多い場合）
-        while 'LastEvaluatedKey' in response:
-            response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
-            items.extend(response.get('Items', []))
+        if not player_name:
+            player_name = 'ANONYMOUS'
 
-        # ソート：score 降順 → created_at 昇順（同点タイブレーク）
-        items.sort(
-            key=lambda x: (-int(x['score']), x.get('created_at', ''))
-        )
+        # 既存レコードを取得して最高スコアのみ保持
+        existing = table.get_item(Key={'player_name': player_name}).get('Item')
 
-        # ランキング付与・上位 N 件を返す
-        ranking = []
-        for i, item in enumerate(items[:limit], start=1):
-            ranking.append({
-                'rank':          i,
-                'player_name':   item['player_name'],
-                'score':         int(item['score']),
-                'level_reached': int(item.get('level_reached', 1)),
-                'played_at':     item.get('created_at', ''),
-            })
+        if existing and int(existing.get('score', 0)) >= new_score:
+            # 既存スコアが同点以上 → 登録スキップ
+            rank = _get_rank(new_score)
+            return {
+                'statusCode': 200,
+                'headers': CORS_HEADERS,
+                'body': json.dumps({'rank': rank, 'updated': False}),
+            }
 
+        # 新しい最高スコアを登録（上書き）
+        created_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+        table.put_item(Item={
+            'player_name':   player_name,
+            'score':         Decimal(str(new_score)),
+            'level_reached': Decimal(str(level_reached)),
+            'created_at':    created_at,
+        })
+
+        rank = _get_rank(new_score)
         return {
-            'statusCode': 200,
+            'statusCode': 201,
             'headers': CORS_HEADERS,
-            'body': json.dumps(ranking, ensure_ascii=False),
+            'body': json.dumps({'rank': rank, 'updated': True}),
         }
 
     except Exception as e:
@@ -59,3 +60,11 @@ def lambda_handler(event, context):
             'headers': CORS_HEADERS,
             'body': json.dumps({'error': 'Internal server error'}),
         }
+
+
+def _get_rank(score: int) -> int:
+    """全件スキャンして指定スコアより高いレコード数 + 1 を返す"""
+    response = table.scan(
+        FilterExpression=boto3.dynamodb.conditions.Attr('score').gt(Decimal(str(score)))
+    )
+    return len(response.get('Items', [])) + 1
