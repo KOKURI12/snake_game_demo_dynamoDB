@@ -44,3 +44,4 @@ jobs:
             --stack-name ${{ secrets.SAM_STACK_NAME }} \
             --region ${{ secrets.AWS_REGION }} \
             --capabilities CAPABILITY_IAM
+            --resolve-s3
