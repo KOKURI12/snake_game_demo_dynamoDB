@@ -38,6 +38,7 @@ jobs:
       - name: SAM deploy
         run: |
           cd infrastructure
+          sam build
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
@@ -45,3 +46,4 @@ jobs:
             --region ${{ secrets.AWS_REGION }} \
             --capabilities CAPABILITY_IAM
             --resolve-s3
+            --template-file template.yaml
