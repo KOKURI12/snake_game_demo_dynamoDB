@@ -1,0 +1,15 @@
+# SAM ビルド成果物
+.aws-sam/
+
+# SAM デプロイ設定（AWSアカウントIDが含まれるため除外）
+samconfig.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+
+# OS
+.DS_Store
+Thumbs.db

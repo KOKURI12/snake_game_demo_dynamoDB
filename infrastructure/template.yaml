@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: |
+  Snake Game — AWS 3層アーキテクチャ（DynamoDB版）
+  プレゼンテーション: S3 + CloudFront
+  アプリケーション:   API Gateway + Lambda
+  データ:             DynamoDB（VPC不要・フルマネージド）
+
+# ============================================================
+# パラメータ
+# ============================================================
+Parameters:
+  ProjectName:
+    Type: String
+    Default: snake-game
+    Description: リソース名プレフィックス
+
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, stg, prod]
+    Description: デプロイステージ
+
+# ============================================================
+# 条件
+# ============================================================
+Conditions:
+  IsProd: !Equals [!Ref Stage, prod]
+
+# ============================================================
+# グローバル設定
+# ============================================================
+Globals:
+  Function:
+    Runtime:       python3.12
+    Timeout:       15
+    MemorySize:    256
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        TABLE_NAME:   !Ref ScoresTable
+        ALLOW_ORIGIN: !Sub 'https://${CloudFrontDistribution.DomainName}'
+
+# ============================================================
+# リソース定義
+# ============================================================
+Resources:
+
+  # ──────────────────────────────────────────────────────────
+  # [プレゼンテーション層] S3 バケット（静的ホスティング）
+  # ──────────────────────────────────────────────────────────
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-frontend-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls:       true
+        BlockPublicPolicy:     true
+        IgnorePublicAcls:      true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+
+  OAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name:                          !Sub '${ProjectName}-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior:               always
+        SigningProtocol:               sigv4
+
+  # ──────────────────────────────────────────────────────────
+  # [プレゼンテーション層] CloudFront ディストリビューション
+  # ──────────────────────────────────────────────────────────
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled:           true
+        DefaultRootObject: index.html
+        HttpVersion:       http2and3
+        IPV6Enabled:       true
+        PriceClass:        PriceClass_200
+        Origins:
+          - Id:         S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OAC.Id
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId:       S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId:        658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          Compress:             true
+        CustomErrorResponses:
+          - ErrorCode:          403
+            ResponseCode:       200
+            ResponsePagePath:   /index.html
+            ErrorCachingMinTTL: 0
+
+  # ──────────────────────────────────────────────────────────
+  # [アプリケーション層] API Gateway（HTTP API）
+  # ──────────────────────────────────────────────────────────
+  SnakeApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub 'https://${CloudFrontDistribution.DomainName}'
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [Content-Type]
+        MaxAge: 86400
+
+  # ──────────────────────────────────────────────────────────
+  # [アプリケーション層] Lambda — スコア登録
+  # ──────────────────────────────────────────────────────────
+  PostScoreFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-post-score-${Stage}'
+      CodeUri:      ../backend/post_score/
+      Handler:      lambda_function.lambda_handler
+      Description:  スコア登録 API (POST /scores)
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScoresTable
+      Events:
+        PostScore:
+          Type: HttpApi
+          Properties:
+            ApiId:  !Ref SnakeApi
+            Path:   /scores
+            Method: POST
+
+  # ──────────────────────────────────────────────────────────
+  # [アプリケーション層] Lambda — ランキング取得
+  # ──────────────────────────────────────────────────────────
+  GetRankingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-get-ranking-${Stage}'
+      CodeUri:      ../backend/get_ranking/
+      Handler:      lambda_function.lambda_handler
+      Description:  ランキング取得 API (GET /ranking)
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScoresTable
+      Events:
+        GetRanking:
+          Type: HttpApi
+          Properties:
+            ApiId:  !Ref SnakeApi
+            Path:   /ranking
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────
+  # [データ層] DynamoDB テーブル
+  # ──────────────────────────────────────────────────────────
+  ScoresTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName:   !Sub '${ProjectName}-scores-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: player_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: player_name
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [IsProd, true, false]
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Stage
+          Value: !Ref Stage
+
+# ============================================================
+# 出力
+# ============================================================
+Outputs:
+  CloudFrontURL:
+    Description: ゲームの公開 URL (CloudFront)
+    Value:        !Sub 'https://${CloudFrontDistribution.DomainName}'
+
+  ApiEndpoint:
+    Description: API Gateway エンドポイント
+    Value:        !Sub 'https://${SnakeApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+
+  FrontendBucketName:
+    Description: 静的ファイルのアップロード先 S3 バケット
+    Value:        !Ref FrontendBucket
+
+  DynamoDBTableName:
+    Description: DynamoDB テーブル名
+    Value:        !Ref ScoresTable
