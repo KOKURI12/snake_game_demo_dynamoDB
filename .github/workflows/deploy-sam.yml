@@ -30,12 +30,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ secrets.AWS_REGION }}
 
-      - name: SAM build
-        run: |
-          cd infrastructure
-          sam build
-
-      - name: SAM deploy
+      - name: SAM build and deploy
         run: |
           cd infrastructure
           sam build
