@@ -1,4 +1,4 @@
-# DynamoDB版 初回デプロイ動作確認_3nd
+# DynamoDB版 初回デプロイ動作確認_4nd
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: |
