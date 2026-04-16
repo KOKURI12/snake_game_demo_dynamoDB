@@ -45,5 +45,3 @@ jobs:
             --stack-name ${{ secrets.SAM_STACK_NAME }} \
             --region ${{ secrets.AWS_REGION }} \
             --capabilities CAPABILITY_IAM
-            --resolve-s3
-            --template-file .aws-sam/build/template.yaml
