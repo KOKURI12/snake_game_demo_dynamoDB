@@ -12,4 +12,3 @@ parallel = true
 [default.deploy.parameters]
 confirm_changeset         = false
 no_fail_on_empty_changeset = true
-resolve_s3                = true
