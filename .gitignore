@@ -1,0 +1,12 @@
+# SAM ビルド成果物
+.aws-sam/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+
+# OS
+.DS_Store
+Thumbs.db
