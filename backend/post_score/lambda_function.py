@@ -30,6 +30,9 @@ CORS_HEADERS = {
     'Access-Control-Allow-Origin': os.environ.get('ALLOW_ORIGIN', '*'),
 }
 
+# TEST DEPLOY TRIGGER (temporary):
+# print('post_score lambda deployed for UI behavior verification')
+
 
 def lambda_handler(event, context):
     try:
