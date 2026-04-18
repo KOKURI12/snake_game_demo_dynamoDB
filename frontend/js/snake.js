@@ -29,6 +29,7 @@
   const hiEl      = document.getElementById('hi-val');
   const msgEl     = document.getElementById('message');
   const levelEl   = document.getElementById('level-display');
+  const gameWrap  = document.getElementById('game-wrap');
   const actionBtn = document.getElementById('action-btn');
 
   // Modal elements
@@ -48,6 +49,7 @@
   let score = 0, hi = 0, lvl = 1, speed = BASE_SPEED;
   let state = 'idle';   // idle | running | paused | over
   let rafId = null, lastTs = 0;
+  let levelFlashTimer = null;
 
   /* ── Canvas DPR / Resize ── */
   function setupCanvas() {
@@ -104,6 +106,7 @@
     placeFood();
     updateHUD();
     levelEl.textContent = 'LEVEL 1';
+    clearLevelFlash();
     setState('running');
     rafId = requestAnimationFrame(loop);
   }
@@ -168,14 +171,38 @@
       if (score > hi) hi = score;
       updateHUD();
       if (score % 5 === 0) {
-        lvl = Math.min(lvl + 1, 10);
-        speed = Math.max(MIN_SPEED, BASE_SPEED - lvl * 15);
-        levelEl.textContent = 'LEVEL ' + lvl;
+        const nextLvl = Math.min(lvl + 1, 10);
+        if (nextLvl !== lvl) {
+          lvl = nextLvl;
+          speed = Math.max(MIN_SPEED, BASE_SPEED - lvl * 15);
+          levelEl.textContent = 'LEVEL ' + lvl;
+          triggerLevelFlash();
+        }
       }
       placeFood();
     } else {
       snake.pop();
     }
+  }
+
+  function clearLevelFlash() {
+    if (levelFlashTimer) {
+      clearTimeout(levelFlashTimer);
+      levelFlashTimer = null;
+    }
+    levelEl.classList.remove('level-flash');
+    gameWrap.classList.remove('level-flash');
+  }
+
+  function triggerLevelFlash() {
+    clearLevelFlash();
+    levelEl.classList.add('level-flash');
+    gameWrap.classList.add('level-flash');
+    levelFlashTimer = setTimeout(() => {
+      levelEl.classList.remove('level-flash');
+      gameWrap.classList.remove('level-flash');
+      levelFlashTimer = null;
+    }, 480);
   }
 
   /* ── Draw ── */
