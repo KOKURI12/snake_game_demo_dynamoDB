@@ -270,6 +270,7 @@ body {
 .rank-num.top3 { color: #f57f17; }
 .rank-name {
   flex: 1;
+  min-width: 0;
   color: var(--text-sub);
   overflow: hidden;
   text-overflow: ellipsis;

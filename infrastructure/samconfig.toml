@@ -12,3 +12,4 @@ parallel = true
 [default.deploy.parameters]
 confirm_changeset          = false
 no_fail_on_empty_changeset = true
+parameter_overrides        = "ProjectName=snake-game Stage=dev VpcId=vpc-028acf98067e61dca PrivateSubnet1=subnet-0ca0cb85ae0b6dc97 PrivateSubnet2=subnet-0c5597f6cf495b98b PrivateRouteTable1=rtb-095f1a20605d33029 PrivateRouteTable2=rtb-0a9a26c3c3788163c"

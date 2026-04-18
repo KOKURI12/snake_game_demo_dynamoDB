@@ -1,11 +1,12 @@
-# DynamoDB版 初回デプロイ動作確認_8nd
+# DynamoDB + ElastiCache Redis版
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: |
-  Snake Game — AWS 3層アーキテクチャ（DynamoDB版）
+  Snake Game — AWS 3層アーキテクチャ（DynamoDB + ElastiCache Redis版）
   プレゼンテーション: S3 + CloudFront
-  アプリケーション:   API Gateway + Lambda
-  データ:             DynamoDB（VPC不要・フルマネージド）
+  アプリケーション:   API Gateway + Lambda（VPC内）
+  データ:             DynamoDB + ElastiCache Redis
+  ネットワーク:       VPC Interface/Gateway エンドポイント
 
 # ============================================================
 # パラメータ
@@ -14,13 +15,28 @@ Parameters:
   ProjectName:
     Type: String
     Default: snake-game
-    Description: リソース名プレフィックス
 
   Stage:
     Type: String
     Default: dev
     AllowedValues: [dev, stg, prod]
-    Description: デプロイステージ
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+
+  PrivateRouteTable1:
+    Type: String
+    Description: プライベートサブネット1のルートテーブルID（ap-northeast-1a）
+
+  PrivateRouteTable2:
+    Type: String
+    Description: プライベートサブネット2のルートテーブルID（ap-northeast-1c）
 
 # ============================================================
 # 条件
@@ -37,10 +53,21 @@ Globals:
     Timeout:       15
     MemorySize:    256
     Architectures: [arm64]
+    VpcConfig:
+      SecurityGroupIds: [!Ref LambdaSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
     Environment:
       Variables:
-        TABLE_NAME:   !Ref ScoresTable
-        ALLOW_ORIGIN: !Sub 'https://${CloudFrontDistribution.DomainName}'
+        TABLE_NAME:    !Ref ScoresTable
+        ALLOW_ORIGIN:  !Sub 'https://${CloudFrontDistribution.DomainName}'
+        REDIS_HOST:    !GetAtt RedisCluster.RedisEndpoint.Address
+        REDIS_PORT:    '6379'
+        CACHE_TTL:     '3600'
+        GSI_NAME:      RankingIndex
+        GSI_PK_NAME:   gsi_pk
+        GSI_PK_VALUE:  ALL
 
 # ============================================================
 # リソース定義
@@ -48,7 +75,7 @@ Globals:
 Resources:
 
   # ──────────────────────────────────────────────────────────
-  # [プレゼンテーション層] S3 バケット（静的ホスティング）
+  # [プレゼンテーション層] S3 + CloudFront
   # ──────────────────────────────────────────────────────────
   FrontendBucket:
     Type: AWS::S3::Bucket
@@ -86,9 +113,6 @@ Resources:
         SigningBehavior:               always
         SigningProtocol:               sigv4
 
-  # ──────────────────────────────────────────────────────────
-  # [プレゼンテーション層] CloudFront ディストリビューション
-  # ──────────────────────────────────────────────────────────
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -106,7 +130,7 @@ Resources:
         DefaultCacheBehavior:
           TargetOriginId:       S3Origin
           ViewerProtocolPolicy: redirect-to-https
-          CachePolicyId:        658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          CachePolicyId:        658327ea-f89d-4fab-a63d-7e88639e58f6
           Compress:             true
         CustomErrorResponses:
           - ErrorCode:          403
@@ -115,7 +139,7 @@ Resources:
             ErrorCachingMinTTL: 0
 
   # ──────────────────────────────────────────────────────────
-  # [アプリケーション層] API Gateway（HTTP API）
+  # [アプリケーション層] API Gateway
   # ──────────────────────────────────────────────────────────
   SnakeApi:
     Type: AWS::Serverless::HttpApi
@@ -129,7 +153,7 @@ Resources:
         MaxAge: 86400
 
   # ──────────────────────────────────────────────────────────
-  # [アプリケーション層] Lambda — スコア登録
+  # [アプリケーション層] Lambda
   # ──────────────────────────────────────────────────────────
   PostScoreFunction:
     Type: AWS::Serverless::Function
@@ -138,6 +162,8 @@ Resources:
       CodeUri:      ../backend/post_score/
       Handler:      lambda_function.lambda_handler
       Description:  スコア登録 API (POST /scores)
+      Layers:
+        - !Ref RedisPyLayer
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ScoresTable
@@ -149,9 +175,6 @@ Resources:
             Path:   /scores
             Method: POST
 
-  # ──────────────────────────────────────────────────────────
-  # [アプリケーション層] Lambda — ランキング取得
-  # ──────────────────────────────────────────────────────────
   GetRankingFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -159,6 +182,8 @@ Resources:
       CodeUri:      ../backend/get_ranking/
       Handler:      lambda_function.lambda_handler
       Description:  ランキング取得 API (GET /ranking)
+      Layers:
+        - !Ref RedisPyLayer
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ScoresTable
@@ -171,7 +196,96 @@ Resources:
             Method: GET
 
   # ──────────────────────────────────────────────────────────
-  # [データ層] DynamoDB テーブル
+  # Lambda Layer — redis-py
+  # ──────────────────────────────────────────────────────────
+  RedisPyLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName:               !Sub '${ProjectName}-redispy'
+      Description:             redis-py for Python 3.12
+      ContentUri:              ../backend/layer/
+      CompatibleRuntimes:      [python3.12]
+      CompatibleArchitectures: [arm64]
+    Metadata:
+      BuildMethod: python3.12
+
+  # ──────────────────────────────────────────────────────────
+  # [ネットワーク] セキュリティグループ
+  # ──────────────────────────────────────────────────────────
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Lambda functions SG
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-lambda-sg'
+
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: VPC Interface Endpoints SG
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort:   443
+          ToPort:     443
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpce-sg'
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ElastiCache Redis SG
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort:   6379
+          ToPort:     6379
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-redis-sg'
+
+  # ──────────────────────────────────────────────────────────
+  # [ネットワーク] VPC エンドポイント
+  # ──────────────────────────────────────────────────────────
+  CloudWatchLogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName:       !Sub 'com.amazonaws.${AWS::Region}.logs'
+      VpcId:             !Ref VpcId
+      VpcEndpointType:   Interface
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:  [!Ref VPCEndpointSecurityGroup]
+      PrivateDnsEnabled: true
+
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName:     !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId:           !Ref VpcId
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable1
+        - !Ref PrivateRouteTable2
+
+  DynamoDBEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName:     !Sub 'com.amazonaws.${AWS::Region}.dynamodb'
+      VpcId:           !Ref VpcId
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable1
+        - !Ref PrivateRouteTable2
+
+  # ──────────────────────────────────────────────────────────
+  # [データ層] DynamoDB
   # ──────────────────────────────────────────────────────────
   ScoresTable:
     Type: AWS::DynamoDB::Table
@@ -182,12 +296,53 @@ Resources:
       AttributeDefinitions:
         - AttributeName: player_name
           AttributeType: S
+        - AttributeName: gsi_pk
+          AttributeType: S
+        - AttributeName: score
+          AttributeType: N
       KeySchema:
         - AttributeName: player_name
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: RankingIndex
+          KeySchema:
+            - AttributeName: gsi_pk
+              KeyType: HASH
+            - AttributeName: score
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: !If [IsProd, true, false]
       DeletionProtectionEnabled: !If [IsProd, true, false]
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Stage
+          Value: !Ref Stage
+
+  # ──────────────────────────────────────────────────────────
+  # [データ層] ElastiCache Redis
+  # ──────────────────────────────────────────────────────────
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      CacheSubnetGroupName: !Sub '${ProjectName}-redis-subnet-${Stage}-${AWS::AccountId}'
+      Description:          !Sub '${ProjectName} Redis Subnet Group'
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  RedisCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      #ClusterName:          !Sub '${ProjectName}-redis-${Stage}' ClusterName省略 → CloudFormationが自動生成（20文字制限を回避）
+      Engine:               redis
+      EngineVersion:        '7.1'
+      CacheNodeType:        cache.t4g.micro
+      NumCacheNodes:        1
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      VpcSecurityGroupIds:  [!Ref RedisSecurityGroup]
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -199,7 +354,7 @@ Resources:
 # ============================================================
 Outputs:
   CloudFrontURL:
-    Description: ゲームの公開 URL (CloudFront)
+    Description: ゲームの公開 URL
     Value:        !Sub 'https://${CloudFrontDistribution.DomainName}'
 
   ApiEndpoint:
@@ -207,9 +362,13 @@ Outputs:
     Value:        !Sub 'https://${SnakeApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
 
   FrontendBucketName:
-    Description: 静的ファイルのアップロード先 S3 バケット
+    Description: S3 バケット名
     Value:        !Ref FrontendBucket
 
   DynamoDBTableName:
     Description: DynamoDB テーブル名
     Value:        !Ref ScoresTable
+
+  RedisEndpoint:
+    Description: ElastiCache Redis エンドポイント
+    Value:        !GetAtt RedisCluster.RedisEndpoint.Address
