@@ -12,6 +12,7 @@
   --panel-shadow: 0 10px 30px rgba(46, 125, 50, 0.12),
                   0 2px 6px  rgba(46, 125, 50, 0.08);
   --canvas-bg:    #fafffa;
+  --canvas-level-flash: #f3faf1;
   --grid:         #e0ebe0;
   --border:       #c8e6c9;
 
@@ -93,11 +94,13 @@ body {
 #hud {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   width: 100%;
   padding: 10px 14px;
   background: #f1f8f1;
   border-radius: 12px;
   border: 1px solid var(--border);
+  gap: 10px;
 }
 .hud-item { display: flex; flex-direction: column; }
 .hud-item.right { text-align: right; align-items: flex-end; }
@@ -141,7 +144,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  min-height: 44px;
+  min-height: 34px;
 }
 #message {
   font-size: 13px;
@@ -158,6 +161,20 @@ body {
   background: #e8f5e9;
   padding: 3px 10px;
   border-radius: 999px;
+  border: 1px solid rgba(46, 125, 50, 0.12);
+  justify-content: center;
+  align-items: center;
+  min-width: 94px;
+  transition: background-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+}
+#level-display.level-flash {
+  background: #d6f2d7;
+  color: #1b5e20;
+  box-shadow: 0 0 0 3px rgba(102, 187, 106, 0.22);
+  transform: translateY(-1px);
+}
+#game-wrap.level-flash #game-canvas {
+  background: var(--canvas-level-flash);
 }
 
 /* ===== Buttons ===== */
