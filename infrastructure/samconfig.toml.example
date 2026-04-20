@@ -1,0 +1,10 @@
+﻿# SAM デプロイ設定サンプル
+# このファイルをコピーして samconfig.toml を作成し、各値を環境に合わせて変更してください
+# cp samconfig.toml.example samconfig.toml
+
+version = 0.1
+
+[default.deploy.parameters]
+confirm_changeset           = false
+no_fail_on_empty_changeset  = true
+parameter_overrides         = "ProjectName=snake-game Stage=dev VpcId=YOUR_VPC_ID PrivateSubnet1=YOUR_SUBNET_ID_1 PrivateSubnet2=YOUR_SUBNET_ID_2 PrivateRouteTable1=YOUR_ROUTE_TABLE_ID_1 PrivateRouteTable2=YOUR_ROUTE_TABLE_ID_2"
