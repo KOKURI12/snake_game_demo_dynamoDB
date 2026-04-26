@@ -1,0 +1,11 @@
+.env
+.env.*
+*.pem
+*.key
+secrets/
+credentials/
+node_modules/
+dist/
+build/
+coverage/
+*.log
