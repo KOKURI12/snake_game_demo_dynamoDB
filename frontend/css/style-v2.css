@@ -51,6 +51,45 @@
 
 html, body { height: 100%; }
 
+/* ===== Background FX layer (Phase 2-B) ===== */
+#fx-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+/* ネオングリッド（薄く・ゆっくりドリフト） */
+#fx-bg::before {
+  content: '';
+  position: absolute;
+  inset: -20%;
+  background-image:
+    linear-gradient(rgba(0, 255, 224, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 224, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: fx-bg-drift 30s linear infinite;
+  will-change: transform;
+}
+/* radial glow（cyan + magenta、低周期で呼吸） */
+#fx-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(0, 255, 224, 0.15), transparent 40%),
+    radial-gradient(circle at 80% 70%, rgba(255, 61, 240, 0.12), transparent 45%);
+  animation: fx-bg-glow 12s ease-in-out infinite alternate;
+}
+@keyframes fx-bg-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(40px, 40px, 0); }
+}
+@keyframes fx-bg-glow {
+  0%   { opacity: 0.7; }
+  100% { opacity: 1.0; }
+}
+
 body {
   background: linear-gradient(135deg, var(--bg-start) 0%, var(--bg-end) 100%);
   color: var(--text-main);
@@ -74,6 +113,9 @@ body {
   width: 100%;
   max-width: 860px;
   margin-top: 12px;
+  /* Phase 2-B: #fx-bg (z-index:0) より前面に配置 */
+  position: relative;
+  z-index: 1;
 }
 
 /* ===== Game Card ===== */
@@ -102,6 +144,17 @@ body {
   background: linear-gradient(135deg, rgba(255, 61, 240, 0.18) 0%, rgba(0, 255, 224, 0.18) 100%);
   box-shadow: 0 0 40px rgba(0, 255, 224, 0.45),
               0 10px 30px rgba(0, 0, 0, 0.55);
+  /* Phase 2-B: level-up 瞬間に1回だけ burst */
+  animation: level-burst 0.6s ease-out;
+}
+@keyframes level-burst {
+  0%   { box-shadow: 0 0 40px  rgba(0, 255, 224, 0.45),
+                     0 10px 30px rgba(0, 0, 0, 0.55); }
+  30%  { box-shadow: 0 0 80px  rgba(0, 255, 224, 0.85),
+                     0 0 140px rgba(255, 61, 240, 0.4),
+                     0 10px 30px rgba(0, 0, 0, 0.55); }
+  100% { box-shadow: 0 0 40px  rgba(0, 255, 224, 0.45),
+                     0 10px 30px rgba(0, 0, 0, 0.55); }
 }
 
 /* ===== Title ===== */
@@ -114,6 +167,13 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  /* Phase 2-B: ネオンパルス */
+  animation: title-neon-pulse 3s ease-in-out infinite;
+}
+@keyframes title-neon-pulse {
+  0%, 100% { text-shadow: 0 0 12px rgba(0, 255, 224, 0.55); }
+  50%      { text-shadow: 0 0 20px rgba(0, 255, 224, 0.85),
+                          0 0 4px  rgba(0, 255, 224, 0.6); }
 }
 #title::before {
   content: '';
@@ -137,6 +197,29 @@ body {
   border-radius: 12px;
   border: 1px solid var(--glass-border);
   gap: 8px;
+  /* Phase 2-B: shimmer 用 stacking 制御 */
+  position: relative;
+  overflow: hidden;
+}
+#hud > * { position: relative; z-index: 1; }
+#hud::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(0, 255, 224, 0.10) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: hud-shimmer 9s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes hud-shimmer {
+  0%, 80%, 100% { transform: translateX(-100%); }
+  90%           { transform: translateX(100%); }
 }
 .hud-item { display: flex; flex-direction: column; flex: 1; }
 .hud-item.center { text-align: center; align-items: center; }
@@ -257,7 +340,12 @@ body {
   box-shadow: 0 0 16px rgba(0, 255, 224, 0.45),
               0 4px 12px rgba(0, 0, 0, 0.45);
 }
-.btn-primary:hover { filter: brightness(1.05); }
+.btn-primary:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 28px rgba(0, 255, 224, 0.7),
+              0 0 50px rgba(0, 255, 224, 0.3),
+              0 4px 14px rgba(0, 0, 0, 0.5);
+}
 .btn-primary:active { transform: scale(0.97); }
 
 /* v2: BGM トグル用アイコンボタン */
@@ -279,7 +367,10 @@ body {
   transition: background 0.15s, color 0.15s, transform 0.05s;
   -webkit-tap-highlight-color: transparent;
 }
-.icon-btn:hover   { background: rgba(0, 255, 224, 0.18); }
+.icon-btn:hover   {
+  background: rgba(0, 255, 224, 0.18);
+  box-shadow: 0 0 12px rgba(0, 255, 224, 0.4);
+}
 .icon-btn:active  { transform: scale(0.95); }
 .icon-btn[aria-pressed="false"] {
   background: rgba(40, 40, 55, 0.55);
@@ -334,6 +425,29 @@ body {
   padding: 20px;
   width: 200px;
   flex-shrink: 0;
+  /* Phase 2-B: light sweep 用 stacking 制御 */
+  position: relative;
+  overflow: hidden;
+}
+#ranking-panel > * { position: relative; z-index: 1; }
+#ranking-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 35%,
+    rgba(0, 255, 224, 0.07) 50%,
+    transparent 65%
+  );
+  transform: translateX(-100%);
+  animation: ranking-sweep 14s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes ranking-sweep {
+  0%, 70%, 100% { transform: translateX(-100%); }
+  85%           { transform: translateX(100%); }
 }
 #ranking-panel h2 {
   font-size: 13px;
@@ -488,7 +602,12 @@ body {
               0 4px 12px rgba(0, 0, 0, 0.4);
   transition: filter 0.15s;
 }
-.btn-submit:hover { filter: brightness(1.05); }
+.btn-submit:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 28px rgba(0, 255, 224, 0.6),
+              0 0 50px rgba(0, 255, 224, 0.25),
+              0 4px 14px rgba(0, 0, 0, 0.45);
+}
 .btn-skip {
   padding: 11px 16px;
   font-family: inherit;
@@ -547,4 +666,14 @@ body {
   #app, #hud {
     background: rgba(16, 22, 40, 0.92);
   }
+}
+
+/* ===== prefers-reduced-motion フォールバック (Phase 2-B) ===== */
+@media (prefers-reduced-motion: reduce) {
+  #fx-bg::before { animation: none; }
+  #fx-bg::after  { animation: none; opacity: 0.85; }
+  #title         { animation: none; }
+  #hud::after,
+  #ranking-panel::before { display: none; }
+  #app.level-up-bg { animation: none; }
 }
