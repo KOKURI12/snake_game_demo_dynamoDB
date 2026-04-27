@@ -474,6 +474,24 @@ body {
   align-items: center;
   gap: 8px;
   font-size: 13px;
+  /* Phase 3-A: 全行共通レイアウト（top 3 backgrounds と統一感を確保） */
+  padding: 4px 6px;
+  border-left: 2px solid transparent;
+  border-radius: 6px;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+/* Phase 3-A: Top 3 行の背景・border-left 配色 */
+#ranking-list li:nth-child(1) {
+  background: linear-gradient(90deg, rgba(255, 210, 74, 0.14) 0%, transparent 100%);
+  border-left-color: #ffd24a;
+}
+#ranking-list li:nth-child(2) {
+  background: linear-gradient(90deg, rgba(216, 227, 236, 0.10) 0%, transparent 100%);
+  border-left-color: #d8e3ec;
+}
+#ranking-list li:nth-child(3) {
+  background: linear-gradient(90deg, rgba(232, 154, 90, 0.12) 0%, transparent 100%);
+  border-left-color: #e89a5a;
 }
 .rank-num {
   font-size: 11px;
@@ -483,7 +501,31 @@ body {
   text-align: right;
   flex-shrink: 0;
 }
-.rank-num.top3 { color: var(--neon-amber); text-shadow: 0 0 6px rgba(255, 176, 32, 0.6); }
+/* Phase 3-A: Top 3 は数字を隠して medal emoji で表示（::before に置換） */
+.rank-num.top3 {
+  font-size: 0;
+  color: transparent;
+  text-shadow: none;
+  width: auto;
+  min-width: 22px;
+}
+.rank-num.top3::before {
+  font-size: 16px;
+  display: inline-block;
+  line-height: 1;
+}
+#ranking-list li:nth-child(1) .rank-num.top3::before {
+  content: '🥇';
+  filter: drop-shadow(0 0 6px rgba(255, 210, 74, 0.8));
+}
+#ranking-list li:nth-child(2) .rank-num.top3::before {
+  content: '🥈';
+  filter: drop-shadow(0 0 5px rgba(216, 227, 236, 0.6));
+}
+#ranking-list li:nth-child(3) .rank-num.top3::before {
+  content: '🥉';
+  filter: drop-shadow(0 0 5px rgba(232, 154, 90, 0.6));
+}
 .rank-name {
   flex: 1;
   min-width: 0;
@@ -497,17 +539,73 @@ body {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
+/* Phase 3-A: Top 3 の name/score をランク別に強調 */
+#ranking-list li:nth-child(1) .rank-name { color: var(--text-main); font-weight: 600; }
+#ranking-list li:nth-child(1) .rank-score {
+  color: #ffd24a;
+  text-shadow: 0 0 8px rgba(255, 210, 74, 0.55);
+}
+#ranking-list li:nth-child(2) .rank-name { color: var(--text-main); }
+#ranking-list li:nth-child(2) .rank-score {
+  color: #d8e3ec;
+  text-shadow: 0 0 6px rgba(216, 227, 236, 0.45);
+}
+#ranking-list li:nth-child(3) .rank-name { color: var(--text-main); }
+#ranking-list li:nth-child(3) .rank-score {
+  color: #e89a5a;
+  text-shadow: 0 0 6px rgba(232, 154, 90, 0.45);
+}
+/* Phase 3-A: デスクトップでの行 hover 効果 */
+@media (hover: hover) and (pointer: fine) {
+  #ranking-list li:hover {
+    background: rgba(0, 255, 224, 0.06);
+    border-left-color: var(--neon-cyan);
+    transform: translateX(2px);
+  }
+  #ranking-list li:nth-child(1):hover {
+    background: linear-gradient(90deg, rgba(255, 210, 74, 0.20) 0%, rgba(0, 255, 224, 0.06) 100%);
+    border-left-color: #ffd24a;
+  }
+  #ranking-list li:nth-child(2):hover {
+    background: linear-gradient(90deg, rgba(216, 227, 236, 0.16) 0%, rgba(0, 255, 224, 0.06) 100%);
+    border-left-color: #d8e3ec;
+  }
+  #ranking-list li:nth-child(3):hover {
+    background: linear-gradient(90deg, rgba(232, 154, 90, 0.18) 0%, rgba(0, 255, 224, 0.06) 100%);
+    border-left-color: #e89a5a;
+  }
+}
 #ranking-empty {
   font-size: 12px;
   color: var(--text-mute);
   text-align: center;
-  padding: 12px 0;
+  padding: 18px 0 12px;
+  letter-spacing: 0.05em;
+}
+/* Phase 3-A: ゲームらしいアイコンを ::before で追加 */
+#ranking-empty::before {
+  content: '🎮';
+  display: block;
+  font-size: 26px;
+  margin-bottom: 8px;
+  filter: drop-shadow(0 0 8px rgba(0, 255, 224, 0.4));
+  opacity: 0.85;
 }
 #ranking-status {
   font-size: 11px;
   color: var(--text-mute);
   text-align: center;
   margin-top: 12px;
+  min-height: 14px;
+  letter-spacing: 0.05em;
+}
+/* Phase 3-A: status text 表示中は subtle pulse（空文字時はアニメーションなし） */
+#ranking-status:not(:empty) {
+  animation: status-pulse 2.4s ease-in-out infinite;
+}
+@keyframes status-pulse {
+  0%, 100% { opacity: 0.7; text-shadow: none; }
+  50%      { opacity: 1;   text-shadow: 0 0 6px rgba(0, 255, 224, 0.5); }
 }
 
 /* ===== Score Submit Modal ===== */
@@ -633,6 +731,14 @@ body {
   }
   #ranking-list { flex-direction: row; flex-wrap: wrap; gap: 6px 12px; }
   #ranking-list li { width: calc(50% - 6px); }
+  /* Phase 3-A: 2列レイアウトでは Top 3 の背景・border-left を抑え、medal と数字色のみで強調 */
+  #ranking-list li:nth-child(1),
+  #ranking-list li:nth-child(2),
+  #ranking-list li:nth-child(3) {
+    background: none;
+    border-left-color: transparent;
+    padding: 4px 2px;
+  }
 }
 @media (max-width: 480px) {
   body { padding: 8px; }
@@ -668,7 +774,7 @@ body {
   }
 }
 
-/* ===== prefers-reduced-motion フォールバック (Phase 2-B) ===== */
+/* ===== prefers-reduced-motion フォールバック (Phase 2-B / 3-A) ===== */
 @media (prefers-reduced-motion: reduce) {
   #fx-bg::before { animation: none; }
   #fx-bg::after  { animation: none; opacity: 0.85; }
@@ -676,4 +782,8 @@ body {
   #hud::after,
   #ranking-panel::before { display: none; }
   #app.level-up-bg { animation: none; }
+  /* Phase 3-A: ranking 関連のアニメ・hover transform を停止 */
+  #ranking-status:not(:empty) { animation: none; }
+  #ranking-list li { transition: none; }
+  #ranking-list li:hover { transform: none; }
 }
