@@ -167,13 +167,17 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* Phase 2-B: ネオンパルス */
-  animation: title-neon-pulse 3s ease-in-out infinite;
+  /* Phase 2-B: ネオンパルス + Phase 4-C Lite: 1回限りの fade-in slide-down intro */
+  animation: title-intro 0.8s ease-out, title-neon-pulse 3s ease-in-out infinite;
 }
 @keyframes title-neon-pulse {
   0%, 100% { text-shadow: 0 0 12px rgba(0, 255, 224, 0.55); }
   50%      { text-shadow: 0 0 20px rgba(0, 255, 224, 0.85),
                           0 0 4px  rgba(0, 255, 224, 0.6); }
+}
+@keyframes title-intro {
+  0%   { opacity: 0; transform: translateY(-6px); }
+  100% { opacity: 1; transform: translateY(0); }
 }
 #title::before {
   content: '';
@@ -182,6 +186,26 @@ body {
   background: var(--accent-light);
   box-shadow: 0 0 12px var(--neon-cyan),
               0 0 0 4px rgba(0, 255, 224, 0.2);
+}
+/* Phase 4-C Lite: タイトル 2段組（main + sub） */
+#title .title-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.0;
+}
+#title .title-main {
+  letter-spacing: 0.08em;
+  /* font-size は #title から継承（既存メディアクエリ 19px / 18px が効く） */
+}
+#title .title-sub {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--neon-cyan);
+  opacity: 0.7;
+  text-shadow: 0 0 4px rgba(0, 255, 224, 0.35);
+  /* 親の title-neon-pulse 継承を上書きして静的グロウに */
 }
 
 /* ===== HUD（v2: 3列化 SCORE / LEVEL / BEST） ===== */
@@ -625,7 +649,9 @@ body {
   border: 1px solid var(--glass-border);
   border-radius: 18px;
   padding: 28px 28px 24px;
-  box-shadow: 0 0 32px rgba(0, 255, 224, 0.25),
+  /* Phase 4-C Lite: 控えめな inset highlight + 弱めた cyan glow（黒 drop-shadow で depth は維持） */
+  box-shadow: inset 0 1px 0 rgba(0, 255, 224, 0.10),
+              0 0 18px rgba(0, 255, 224, 0.12),
               0 20px 60px rgba(0, 0, 0, 0.6);
   width: 300px;
   max-width: 90vw;
@@ -643,6 +669,14 @@ body {
   font-weight: 700;
   color: var(--accent);
   text-align: center;
+  /* Phase 4-C Lite: 控えめな neon glow + 緩やかな pulse */
+  letter-spacing: 0.18em;
+  text-shadow: 0 0 8px rgba(0, 255, 224, 0.4);
+  animation: modal-title-pulse 3.5s ease-in-out infinite;
+}
+@keyframes modal-title-pulse {
+  0%, 100% { text-shadow: 0 0 6px  rgba(0, 255, 224, 0.35); }
+  50%      { text-shadow: 0 0 12px rgba(0, 255, 224, 0.55); }
 }
 .modal-score-line {
   text-align: center;
@@ -679,7 +713,10 @@ body {
   transition: border-color 0.15s;
 }
 #player-name-input:focus {
-  border-color: var(--accent-light);
+  /* Phase 4-C Lite: 控えめな cyan ring + 控えめ outer glow */
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 0 2px rgba(0, 255, 224, 0.12),
+              0 0 8px rgba(0, 255, 224, 0.2);
 }
 /* Phase 4-B: policy note（短文・控えめ表示） */
 .modal-input-note {
@@ -834,4 +871,6 @@ body {
   #ranking-status:not(:empty) { animation: none; }
   #ranking-list li { transition: none; }
   #ranking-list li:hover { transform: none; }
+  /* Phase 4-C Lite: GAME OVER pulse を停止（#title intro/pulse は既存ルールでカバー済み） */
+  .modal-title { animation: none; }
 }

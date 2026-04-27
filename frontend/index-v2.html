@@ -19,7 +19,12 @@
     <!-- ===== ゲームカード（プレゼンテーション層：S3/CloudFront で配信） ===== -->
     <div id="app">
 
-      <div id="title">SNAKE</div>
+      <div id="title">
+        <span class="title-text">
+          <span class="title-main">NEON SNAKE</span>
+          <span class="title-sub">// SERVERLESS ARCADE</span>
+        </span>
+      </div>
 
       <!-- HUD：SCORE / LEVEL / BEST（v2: 3列化、LEVEL を中央に） -->
       <div id="hud">
@@ -99,7 +104,7 @@
           id="player-name-input"
           type="text"
           maxlength="20"
-          placeholder="名前を入力（省略可）"
+          placeholder="名前を入力（省略不可）"
           autocomplete="off"
           autocorrect="off"
           spellcheck="false"
