@@ -74,9 +74,9 @@ def lambda_handler(event, context):
             for i, item in enumerate(items, start=1)
         ]
 
-        # ── Redisに保存（TTLなし＝Hot Key・LFUで保護）
-        redis_client.set(CACHE_KEY, json.dumps(ranking, ensure_ascii=False))
-        print(f'Cache SET: ranking:top10 ({len(ranking)} items, no TTL)')
+        # ── Redisに保存（TTL付きキャッシュ）
+        redis_client.set(CACHE_KEY, json.dumps(ranking, ensure_ascii=False), ex=CACHE_TTL)
+        print(f'Cache SET: ranking:top10 ({len(ranking)} items, TTL: {CACHE_TTL}s)')
 
         return {
             'statusCode': 200,
