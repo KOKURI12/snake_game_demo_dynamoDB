@@ -681,6 +681,28 @@ body {
 #player-name-input:focus {
   border-color: var(--accent-light);
 }
+/* Phase 4-B: policy note（短文・控えめ表示） */
+.modal-input-note {
+  margin: 6px 2px 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-mute);
+  letter-spacing: 0.02em;
+  text-align: left;
+  opacity: 0.85;
+}
+/* Phase 4-B: input 専用 error 表示（empty 時は 0 高さに collapse） */
+.modal-input-error {
+  margin: 4px 2px 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--neon-magenta);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  text-shadow: 0 0 6px rgba(255, 61, 240, 0.4);
+}
+.modal-input-error:empty { margin: 0; }
 .modal-btn-row {
   display: flex;
   gap: 8px;

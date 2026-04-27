@@ -103,7 +103,12 @@
           autocomplete="off"
           autocorrect="off"
           spellcheck="false"
+          aria-describedby="player-name-note player-name-error"
         />
+        <p id="player-name-note" class="modal-input-note">
+          不適切な名前・個人情報・URLは禁止 / No offensive names, personal info or URLs.
+        </p>
+        <p id="player-name-error" class="modal-input-error" aria-live="polite"></p>
       </div>
       <div class="modal-btn-row">
         <button id="submit-score-btn" class="btn-submit">SUBMIT</button>

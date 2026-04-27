@@ -44,6 +44,7 @@
   const playerNameEl  = document.getElementById('player-name-input');
   const submitBtn     = document.getElementById('submit-score-btn');
   const skipBtn       = document.getElementById('skip-score-btn');
+  const playerNameError = document.getElementById('player-name-error');
 
   // Ranking elements
   const rankingList   = document.getElementById('ranking-list');
@@ -366,14 +367,88 @@
 
   function closeModal() {
     if (scoreModal) scoreModal.setAttribute('hidden', '');
+    setPlayerNameError('');
+  }
+
+  function setPlayerNameError(msg) {
+    if (playerNameError) playerNameError.textContent = msg || '';
+  }
+
+  /**
+   * Phase 4: 最小限の client-side player name バリデーション
+   * - trim / 制御文字除去 / 20文字制限
+   * - URL / email / 長い数字列（連絡先）検出
+   * - 露骨な性的・暴力・差別表現の最小検出
+   * - NG ワードリストは意図的に小さく保つ（過剰判定回避）
+   * - 判定は normalize('NFKC').toLowerCase() 後の文字列で行う
+   * - API 送信は元の name（trim・制御文字除去・truncate のみ）を使う
+   * 戻り値: { ok, name, reason: 'empty' | 'contact' | 'inappropriate' | null }
+   */
+  function validatePlayerName(rawName) {
+    let name = (rawName || '').trim();
+    if (!name) return { ok: false, name: '', reason: 'empty' };
+
+    name = name.replace(/[\x00-\x1f\x7f]/g, '');
+    if (name.length > 20) name = name.slice(0, 20);
+    if (!name) return { ok: false, name: '', reason: 'empty' };
+
+    // 全角→半角・互換文字統合 + 小文字化（判定専用）
+    const normalized = name.normalize('NFKC').toLowerCase();
+    // Phase 4-D: 空白 + 区切り文字（_-./・ー~〜/\|）も除去して回避対策強化
+    // 例: "yama_isGAY" → "yamaisgay" / "g-a-y" → "gay" / "S_E_X" → "sex"
+    const compactNormalized = normalized.replace(/[\s._\-・ー~〜/\\|]+/g, '');
+
+    // 連絡先系（URL / email / 9桁以上の連続数字）
+    if (/https?:\/\//.test(normalized) || /www\./.test(normalized) ||
+        /[\w.+-]+@[\w-]+\.[\w.-]+/.test(normalized) || /\d{9,}/.test(normalized)) {
+      return { ok: false, name, reason: 'contact' };
+    }
+
+    // Phase 4-D: gay / sex / kana 系は compactNormalized.includes() で substring 検出
+    // word boundary を使わないため "yama_isGAY" / "2024Gay_isyama" / "g_a_y" 等も catch
+    const BLOCKED_COMPACT_TERMS = [
+      'gay', 'sex', 'sexy', 'sexual',
+      'げい', 'ゲイ', 'シックス',
+      'セックス', 'せっくす',
+    ];
+    if (BLOCKED_COMPACT_TERMS.some(term => compactNormalized.includes(term))) {
+      return { ok: false, name, reason: 'inappropriate' };
+    }
+
+    // その他の NG パターン（substring 単純検出が向かないもの・word boundary 必須）
+    const NG_PATTERNS = [
+      // 性的（その他の露骨表現）
+      /fuck/i, /\bporn/i,
+      /ファック|ポルノ/,
+      /性交|操逼/,
+      // 暴力・脅迫
+      /\brape\b/i, /\bmurder\b/i,
+      /レイプ|殺害|殺人/,
+      // 差別・侮辱（明確な slurs / 死ね）
+      /\bnigger\b/i, /\bfaggot\b/i,
+      /死ね/,
+    ];
+    if (NG_PATTERNS.some(p => p.test(normalized) || p.test(compactNormalized))) {
+      return { ok: false, name, reason: 'inappropriate' };
+    }
+
+    return { ok: true, name, reason: null };
   }
 
   async function handleScoreSubmit() {
-    const name = playerNameEl.value.trim();
-    if (!name) {
-      setRankingStatus('名前入力わすれていませんか？！');
+    const result = validatePlayerName(playerNameEl.value);
+    if (!result.ok) {
+      if (result.reason === 'empty') {
+        setPlayerNameError('名前を入力してください');
+      } else if (result.reason === 'contact') {
+        setPlayerNameError('URL・連絡先は使えません');
+      } else if (result.reason === 'inappropriate') {
+        setPlayerNameError('別の名前を使ってください');
+      }
       return;
     }
+    setPlayerNameError('');
+    const name = result.name;
     submitBtn.disabled = true;
     submitBtn.textContent = '登録中…';
     try {
@@ -398,6 +473,7 @@
     playerNameEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') handleScoreSubmit();
     });
+    playerNameEl.addEventListener('input', () => setPlayerNameError(''));
   }
   if (skipBtn) {
     skipBtn.addEventListener('click', closeModal);
