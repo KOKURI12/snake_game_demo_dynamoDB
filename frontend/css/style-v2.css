@@ -739,6 +739,32 @@ body {
     border-left-color: transparent;
     padding: 4px 2px;
   }
+  /* Phase 3-A 補正 (mobile): emoji 描画不安定対策で順位番号 1/2/3 を gold/silver/bronze 色で表示 */
+  .rank-num.top3 {
+    font-size: 13px;
+    color: var(--text-mute);
+    text-shadow: none;
+    width: 18px;
+    min-width: 0;
+  }
+  /* specificity (1,3,2) で per-rank ::before ルールを上書きし mobile では medal を完全非表示 */
+  #ranking-list li:nth-child(1) .rank-num.top3::before,
+  #ranking-list li:nth-child(2) .rank-num.top3::before,
+  #ranking-list li:nth-child(3) .rank-num.top3::before {
+    content: none;
+  }
+  #ranking-list li:nth-child(1) .rank-num.top3 {
+    color: #ffd24a;
+    text-shadow: 0 0 4px rgba(255, 210, 74, 0.7);
+  }
+  #ranking-list li:nth-child(2) .rank-num.top3 {
+    color: #d8e3ec;
+    text-shadow: 0 0 3px rgba(216, 227, 236, 0.5);
+  }
+  #ranking-list li:nth-child(3) .rank-num.top3 {
+    color: #e89a5a;
+    text-shadow: 0 0 3px rgba(232, 154, 90, 0.5);
+  }
 }
 @media (max-width: 480px) {
   body { padding: 8px; }
