@@ -160,3 +160,45 @@ ECC hooks は `templates/.claude/settings.json` には入れない。
   - `frontend/index.html`
   - `frontend/css/style.css`
   - `frontend/js/snake.js`
+
+### Phase 5-A
+
+- `frontend/js/audio-v2.js`、`frontend/js/snake-v2.js` を変更
+- BGM の固定 BPM を Level 連動 BPM に変更
+- `audio-v2.js` に `currentBpm` / `targetBpm` / `getBeatSec()` を追加
+- `SnakeAudio.setLevel(level, options)` を追加
+- Level up 時に target BPM 側へ 30% 即時寄せし、その後 beat ごとに easing して約1秒弱で目標 BPM に到達する Micro Ramp を実装
+- BPM 設計:
+  - Lv1: 108
+  - Lv2: 116
+  - Lv3: 124
+  - Lv4: 132
+  - Lv5: 140
+  - Lv6: 148
+  - Lv7: 156
+  - Lv8+: 164 上限
+- new game / restart 時は `setLevel(1, { instant: true })` により Lv1 BPM へ即時 reset
+- `stopBgm()` では BPM state を reset しない方針に変更
+- BGM OFF→ON、pause / resume 時も現在 level の BPM state を保持
+- `snake-v2.js` 側では new game 時と level up 時に `SnakeAudio.setLevel()` を呼ぶ最小変更にした
+- 既存の chiptune BGM メロディ、eat sound、game-over sound は変更なし
+- 外部音源・外部ライブラリは追加なし
+- mobile Safari の AudioContext 制約対応は既存実装を維持
+- PC / スマホ実機確認で違和感なし
+- Lv up 時のテンポ上昇、Restart 時の Lv1 BPM reset、Lv8+ の 164 BPM 上限、BGM toggle / pause / resume / stop の挙動に問題なし
+
+#### Phase 5-A で変更しなかったもの
+
+- `frontend/index-v2.html`
+- `frontend/css/style-v2.css`
+- BGM toggle UI 構造
+- eat sound / game-over sound の基本挙動
+- Canvas / Snake / Food 描画処理
+- Ranking API 仕様
+- Score 登録 API 仕様
+- backend/
+- infrastructure/
+- v2.1 rollback 用ファイル
+  - `frontend/index.html`
+  - `frontend/css/style.css`
+  - `frontend/js/snake.js`

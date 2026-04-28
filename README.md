@@ -14,11 +14,29 @@
 | v1.0 | S3 + CloudFront + API Gateway + Lambda + RDS MySQL | 旧構成(廃止) |
 | v2.0 | RDS → DynamoDB 移行、VPC 撤廃、コスト最適化 | リリース済み |
 | v2.1 | DynamoDB GSI 追加(scan → query 移行)、ElastiCache Redis 導入 | リリース済み |
-| **v2.2** | **UI 改修 + BGM / 効果音追加(ui-audio-v2)** | **リリース済み** |
+| v2.2 | UI 改修 + BGM / 効果音追加(ui-audio-v2) | リリース済み |
+| **v2.3** | **Neon Arcade UI 改修、Player Name validation 強化、BGM Level連動 BPM + Micro Ramp 追加** | **リリース済み** |
+
+### v2.2 ハイライト
+
+- HUD 3列化、level-flash アニメーション、背景色連動
+- Web Audio API による自己生成 BGM (chiptune) と eat / game-over 効果音
+- BGM toggle / pause / resume / stop 対応
+- v2.1 ファイル共存パターンによる rollback 機構
+
+### v2.3 ハイライト
+
+- Neon Arcade Glass UI(タイトル / HUD / Modal / Ranking Panel の刷新)
+- Background FX layer (cinematic glow / shimmer / sweep / level-up burst)
+- Player Name validation(URL / 連絡先 / 不適切表現の最小検出 + 多言語 policy note)
+- BGM Level 連動 BPM (108→164、Micro Ramp で滑らかに加速)
+- `prefers-reduced-motion` 全面対応
+
+詳細な作業ログ・Phase 単位の検証結果は [docs/ecc-selected-skills.md](docs/ecc-selected-skills.md) を参照。
 
 ---
 
-## アーキテクチャ全体図
+## アーキテクチャ
 
 ```
 ユーザー (ブラウザ / スマートフォン)
@@ -32,11 +50,12 @@
 │       │                               │
 │       ▼                               │
 │  S3 Bucket (静的ファイル配信)          │
-│  ├── index.html                       │
-│  ├── css/style.css                    │
-│  └── js/                             │
+│  ├── index-v2.html                    │
+│  ├── css/style-v2.css                 │
+│  └── js/                              │
 │      ├── api.js                       │
-│      └── snake.js                    │
+│      ├── snake-v2.js                  │
+│      └── audio-v2.js                  │
 └───────────────────────────────────────┘
         │
         │ API 呼び出し (HTTPS / JSON)
@@ -63,12 +82,14 @@
 │                                       │
 │  DynamoDB (PAY_PER_REQUEST)           │
 │  └── ScoresTable                      │
-│      ├── PK: player_name             │
-│      └── GSI: RankingIndex           │
-│          ├── gsi_pk (HASH)           │
-│          └── score (RANGE)           │
+│      ├── PK: player_name              │
+│      └── GSI: RankingIndex            │
+│          ├── gsi_pk (HASH)            │
+│          └── score (RANGE)            │
 └───────────────────────────────────────┘
 ```
+
+> v2.1 rollback 用ファイル(`index.html` / `css/style.css` / `js/snake.js`)も S3 上に共存しており、CloudFront の Default Root Object 切替で v2.1 へ rollback 可能。
 
 ---
 
@@ -79,15 +100,15 @@ snake_game_demo_dynamoDB/
 │
 ├── frontend/                        # プレゼンテーション層 (S3 + CloudFront)
 │   ├── index.html                   # v2.1 メインページ(rollback 用に保持)
-│   ├── index-v2.html                # v2.2 メインページ(現 Default Root Object)
+│   ├── index-v2.html                # v2.2/v2.3 メインページ(現 Default Root Object)
 │   ├── css/
 │   │   ├── style.css                # v2.1 スタイル(rollback 用に保持)
-│   │   └── style-v2.css             # v2.2 スタイル(level-flash + 背景色連動)
+│   │   └── style-v2.css             # v2.2/v2.3 スタイル
 │   └── js/
 │       ├── api.js                   # API Gateway クライアント(共通)
 │       ├── snake.js                 # v2.1 ゲームロジック(rollback 用に保持)
-│       ├── snake-v2.js              # v2.2 ゲームロジック(BGM・フラッシュ統合)
-│       └── audio-v2.js             # v2.2 Web Audio API 音源モジュール(新規)
+│       ├── snake-v2.js              # v2.2/v2.3 ゲームロジック
+│       └── audio-v2.js              # Web Audio API 音源モジュール (BGM Micro Ramp 対応)
 │
 ├── backend/                         # アプリケーション層 (API Gateway + Lambda)
 │   ├── post_score/
@@ -102,7 +123,10 @@ snake_game_demo_dynamoDB/
 │   └── samconfig.toml               # SAM デプロイ設定
 │
 ├── scripts/                         # 運用スクリプト
-│   └── backfill_gsi.py             # DynamoDB GSI バックフィルスクリプト
+│   └── backfill_gsi.py              # DynamoDB GSI バックフィルスクリプト
+│
+├── docs/                            # 補助ドキュメント
+│   └── ecc-selected-skills.md       # ECC スキル選定 + Phase 単位の作業ログ
 │
 ├── .claude/                         # Claude Code スキル設定
 │   └── skills/
@@ -120,7 +144,7 @@ snake_game_demo_dynamoDB/
 
 ---
 
-## API 仕様
+## API仕様
 
 ### POST /scores — スコア登録
 
@@ -163,7 +187,7 @@ snake_game_demo_dynamoDB/
 
 ---
 
-## DynamoDB 設計
+## データ設計
 
 ### ScoresTable
 
@@ -189,25 +213,30 @@ snake_game_demo_dynamoDB/
 
 ---
 
-## ElastiCache Redis 設計
+## キャッシュ設計
 
-### キャッシュ戦略
+### ElastiCache Redis
 
 | 対象 | TTL | 用途 |
 |---|---|---|
-| ランキングデータ | 3600秒(1時間) | `get_ranking` の DynamoDB Query 結果をキャッシュ |
+| ランキングデータ (`ranking:top10`) | 環境変数 `CACHE_TTL`(デフォルト 3600秒 = 1時間) | `get_ranking` の DynamoDB Query 結果をキャッシュ |
+
+**TTL 適用方針:**
+- `get_ranking` Lambda 内で `setex(KEY, CACHE_TTL, value)` を呼び、Redis に TTL 付きで永続化
+- TTL 切れ後は自動削除され、次回 `get_ranking` で MISS → DynamoDB Query → 再キャッシュ
+- TTL は環境変数 `CACHE_TTL`(秒数)で制御し、値の変更は `infrastructure/template.yaml` で行う
 
 **Lambda での参照パターン:**
 
 ```
 get_ranking Lambda
-    ├─ Redis に hit → キャッシュデータを返す(高速)
-    └─ Redis に miss → DynamoDB Query → Redis に保存 → データ返却
+    ├─ Redis HIT  → キャッシュデータを返却(高速)
+    └─ Redis MISS → DynamoDB Query → setex で TTL 付き保存 → データ返却
 ```
 
 ---
 
-## デプロイ構成
+## デプロイ
 
 ### GitHub Actions ワークフロー
 
@@ -230,7 +259,7 @@ get_ranking Lambda
 
 ---
 
-## 開発時の運用
+## 運用
 
 ### ブランチ運用
 
@@ -250,112 +279,35 @@ main ──── 本番デプロイ対象(GitHub Actions が自動デプロイ)
 
 ---
 
-## v2.2 リリース済み:ui-audio-v2
+## ゲーム仕様
 
-### 実装内容
+### 操作方法
 
-#### 変更ファイル一覧
-
-| ファイル | 種別 | 内容 |
+| 操作 | キーボード | モバイル |
 |---|---|---|
-| `frontend/index-v2.html` | 新規 | HUD 3列構成 + BGM トグルボタン |
-| `frontend/css/style-v2.css` | 新規 | level-flash アニメーション + 背景色連動 |
-| `frontend/js/audio-v2.js` | 新規 | Web Audio API チップチューン BGM + 効果音 |
-| `frontend/js/snake-v2.js` | 新規 | BGM 制御 + レベルフラッシュ統合 |
-| `frontend/index.html` | 変更なし | 旧バージョン(rollback 用に保持) |
-| `frontend/css/style.css` | 変更なし | 旧バージョン(rollback 用に保持) |
-| `frontend/js/snake.js` | 変更なし | 旧バージョン(rollback 用に保持) |
+| 移動 | 矢印キー / WASD | D-pad ボタン / スワイプ |
+| スタート / リトライ | SPACE | START ボタン |
+| ポーズ / 再開 | ESC | PAUSE / RESUME ボタン |
 
-#### 要件1: level バナー移動 ✅
+### レベル進行
 
-```
-変更前: [SCORE]          [BEST]
-         [LEVEL] ← 独立表示
-変更後: [SCORE]  [LEVEL]  [BEST] ← HUD 3列横並び
-```
+| レベル | 必要スコア | 速度 | BGM BPM |
+|---|---|---|---|
+| Lv 1 | 0 | 180ms/tick | 108 |
+| Lv 2 | 5 | 150ms/tick | 116 |
+| Lv 3 | 10 | 135ms/tick | 124 |
+| Lv 4 | 15 | 120ms/tick | 132 |
+| Lv 5 | 20 | 105ms/tick | 140 |
+| Lv 6 | 25 | 90ms/tick | 148 |
+| Lv 10(最大) | 45 | 60ms/tick | 164(上限) |
 
-- HUD を flex 3列に再構成、LEVEL を中央に配置
-- レベルアップ時: `.level-flash` クラスを 800ms 付与してアニメーション発火
-
-```css
-@keyframes level-pulse {
-  0%   { transform: scale(1)    rotate(0deg); }
-  20%  { transform: scale(1.45) rotate(-6deg); }
-  40%  { transform: scale(1.25) rotate(5deg); }
-  60%  { transform: scale(1.4)  rotate(-4deg); }
-  80%  { transform: scale(1.15) rotate(2deg); }
-  100% { transform: scale(1)    rotate(0deg); }
-}
-```
-
-#### 要件2: 背景色連動 ✅
-
-- レベルアップ時: `#app` に `.level-up-bg` クラスを付与
-- ウォームグラデーションへ transition でフェード変化
-- snake / food の視認性を損なわない薄い変化に設計
-
-#### 要件3: BGM 制御 ✅
-
-- **音源:** 外部ファイル不要、Web Audio API で完全自己生成
-- **スタイル:** C マイナーペンタトニック、132 BPM チップチューン(Square リード + Triangle ベース)
-- **初期状態:** BGM デフォルト ON
-
-```javascript
-// AudioContext.suspend/resume で停止位置を保持
-startGame()  → SnakeAudio.startBgm()
-pauseGame()  → SnakeAudio.pauseBgm()   // AudioContext.suspend()
-resumeGame() → SnakeAudio.resumeBgm()  // AudioContext.resume()
-gameOver()   → SnakeAudio.stopBgm()
-```
-
-- BGM トグルボタン: `🔊 / 🔇` でオン/オフ切り替え可能
-
-#### 要件4: 効果音 ✅
-
-| 効果音 | タイミング | 音 |
-|---|---|---|
-| Eat SE | food 取得時 | 660→1760 Hz の上昇 Square ブリップ |
-| GameOver SE | ゲームオーバー時 | C5→A4→F4→C4 の下降 Sawtooth アルペジオ |
-
-#### 要件5: rollback 対応 ✅
-
-**ファイル共存パターンによる rollback:**
-
-```
-S3 / CloudFront
-├── index.html      ← 旧バージョン v2.1(rollback 時はここを Default Root Object に戻す)
-├── index-v2.html   ← 新バージョン v2.2(現在の Default Root Object)
-├── css/style.css       ← 旧バージョン(変更なし)
-├── css/style-v2.css    ← 新バージョン
-├── js/snake.js         ← 旧バージョン(変更なし)
-├── js/snake-v2.js      ← 新バージョン
-└── js/audio-v2.js      ← 新バージョン(新規追加)
-```
-
-**rollback 手順(30秒で完了):**
-
-```
-1. CloudFront コンソール → ディストリビューション設定
-2. Default Root Object を index-v2.html → index.html に変更
-3. 保存 → キャッシュ削除(Invalidation: /*)
-```
-
-Git ブランチによる rollback:
-- `feature/add-elasticache` ブランチが v2.2 直前の状態を保持
+> v2.3 から Level 連動で BGM の BPM が段階的に上昇(Micro Ramp で滑らかに加速、Lv 8 以降は 164 BPM 上限)。
 
 ---
 
-### v2.2 で発生したトラブルと解決策
+## コスト
 
-| 問題 | 原因 | 解決 |
-|---|---|---|
-| feature ブランチで GitHub Actions が未発火 | deploy-frontend.yml が `main` ブランチのみを対象 | main にマージして push |
-| デプロイ後も UI が変わらない | CloudFront の Default Root Object が旧 `index.html` のまま | AWS コンソールで `index-v2.html` に変更 |
-| CloudFront Invalidation でエラー | パス入力が `/\n/index.html` と解釈された | `/*` で一括削除に変更 |
-
----
-
-## コスト概算(東京リージョン / 月額)
+(東京リージョン / 月額)
 
 | サービス | 想定利用量 | 概算コスト |
 |---|---|---|
@@ -374,32 +326,18 @@ Git ブランチによる rollback:
 
 ---
 
-## ゲーム操作方法
-
-| 操作 | キーボード | モバイル |
-|---|---|---|
-| 移動 | 矢印キー / WASD | D-pad ボタン / スワイプ |
-| スタート / リトライ | SPACE | START ボタン |
-| ポーズ / 再開 | ESC | PAUSE / RESUME ボタン |
-
-### レベル進行
-
-| レベル | 必要スコア | 速度 |
-|---|---|---|
-| Lv 1 | 0 | 180ms/tick |
-| Lv 2 | 5 | 150ms/tick |
-| Lv 3 | 10 | 135ms/tick |
-| Lv 4 | 15 | 120ms/tick |
-| Lv 5 | 20 | 105ms/tick |
-| Lv 6 | 25 | 90ms/tick |
-| Lv 10(最大) | 45 | 60ms/tick |
-
----
-
-## セキュリティ考慮事項
+## セキュリティ
 
 - S3 バケットはパブリックアクセス全遮断(CloudFront OAC 経由のみ)
 - Lambda から DynamoDB / ElastiCache への通信は VPC 内で完結
 - CORS は API Gateway レベルで CloudFront ドメインのみ許可
 - IAM ポリシーは最小権限の原則に従い設定
 - GitHub Secrets で AWS 認証情報を管理(コードへのハードコード禁止)
+
+---
+
+## 変更履歴
+
+詳細な作業ログ・Phase 単位の検証結果は以下を参照してください。
+
+- [docs/ecc-selected-skills.md](docs/ecc-selected-skills.md)
