@@ -68,6 +68,12 @@
     over()      { window.SnakeAudio && window.SnakeAudio.playGameOver(); },
     toggle()    { return window.SnakeAudio ? window.SnakeAudio.toggle() : false; },
     isOn()      { return window.SnakeAudio ? window.SnakeAudio.isEnabled() : false; },
+    // Phase 5-A: Level 連動 BPM（setLevel が未ロードでも安全）
+    setLevel(level, options) {
+      if (window.SnakeAudio && window.SnakeAudio.setLevel) {
+        window.SnakeAudio.setLevel(level, options);
+      }
+    },
   };
 
   /* ── Canvas DPR / Resize ── */
@@ -128,6 +134,8 @@
     clearLevelFlash();
     setState('running');
     rafId = requestAnimationFrame(loop);
+    // Phase 5-A: BGM 開始前に BPM を Lv1 デフォルトに snap（前ゲームの高 BPM を持ち越さない）
+    Audio.setLevel(1, { instant: true });
     Audio.start();
   }
 
@@ -198,7 +206,11 @@
         lvl = Math.min(lvl + 1, 10);
         speed = Math.max(MIN_SPEED, BASE_SPEED - lvl * 15);
         levelEl.textContent = String(lvl);
-        if (lvl !== prev) triggerLevelFlash();
+        if (lvl !== prev) {
+          triggerLevelFlash();
+          // Phase 5-A: Level 連動 BPM（Micro Ramp で 30% 即時 + 残り ease）
+          Audio.setLevel(lvl);
+        }
       }
       placeFood();
     } else {

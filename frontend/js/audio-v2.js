@@ -25,8 +25,19 @@
   let beatIndex    = 0;
 
   /* ── 音楽定義 (C minor pentatonic 系のチップチューン)  ── */
-  const BPM      = 132;
-  const BEAT     = 60 / BPM / 2;     // 8分音符の長さ (秒)
+  // Phase 5-A: BPM を可変化（Level 連動 Micro Ramp）
+  let currentBpm = 108;
+  let targetBpm  = 108;
+  function getBeatSec() { return 60 / currentBpm / 2; }   // 8分音符の長さ (秒)
+
+  // Phase 5-A: Micro Ramp パラメータ
+  const BPM_LEVEL_BASE     = 108;
+  const BPM_LEVEL_STEP     = 8;
+  const BPM_LEVEL_CAP      = 164;
+  const BPM_INITIAL_JUMP   = 0.30;   // setLevel 直後に target 側へ 30% 即時前進
+  const BPM_PER_BEAT_EASE  = 0.5;    // 残差を毎 beat 50% 詰める（4 beat ≈ 0.9s で 95%）
+  const BPM_SNAP_THRESHOLD = 0.5;    // 残差 < 0.5 BPM で snap
+
   const LOOKAHEAD_MS  = 25;          // スケジューラ実行間隔
   const SCHEDULE_SEC  = 0.12;        // 先行スケジュール秒数
   const MASTER_GAIN   = 0.22;
@@ -74,13 +85,21 @@
   function scheduler() {
     if (!ctx) return;
     while (nextNoteTime < ctx.currentTime + SCHEDULE_SEC) {
+      // Phase 5-A: 現在の BPM で先に schedule（setLevel の 30% jump を最初の note に反映）
+      const beatSec = getBeatSec();
       const i = beatIndex % LEAD_NOTES.length;
-      scheduleNote(LEAD_NOTES[i], nextNoteTime, BEAT * 0.85, 'square',   0.18);
+      scheduleNote(LEAD_NOTES[i], nextNoteTime, beatSec * 0.85, 'square',   0.18);
       if (BASS_NOTES[i]) {
-        scheduleNote(BASS_NOTES[i], nextNoteTime, BEAT * 0.9, 'triangle', 0.28);
+        scheduleNote(BASS_NOTES[i], nextNoteTime, beatSec * 0.9, 'triangle', 0.28);
       }
-      nextNoteTime += BEAT;
+      nextNoteTime += beatSec;
       beatIndex++;
+
+      // Phase 5-A: schedule 後に Micro Ramp を 1 beat 分進める
+      if (currentBpm !== targetBpm) {
+        currentBpm += (targetBpm - currentBpm) * BPM_PER_BEAT_EASE;
+        if (Math.abs(targetBpm - currentBpm) < BPM_SNAP_THRESHOLD) currentBpm = targetBpm;
+      }
     }
   }
 
@@ -162,10 +181,37 @@
     return enabled;
   }
 
+  /* ── Phase 5-A: Level 連動 BPM 設定（Micro Ramp） ── */
+  function setLevel(level, options) {
+    options = options || {};
+    // Robust level handling: Number 化 → floor → 1 以上 clamp
+    let lvl = Number(level);
+    if (!isFinite(lvl)) lvl = 1;
+    lvl = Math.max(1, Math.floor(lvl));
+
+    const newTarget = Math.min(
+      BPM_LEVEL_BASE + (lvl - 1) * BPM_LEVEL_STEP,
+      BPM_LEVEL_CAP
+    );
+
+    if (options.instant) {
+      // new game / restart 用: 即座に snap（ramp スキップ）
+      targetBpm  = newTarget;
+      currentBpm = newTarget;
+      return;
+    }
+
+    if (newTarget === targetBpm) return;   // 同じ level なら no-op
+    targetBpm = newTarget;
+    // ゲーム的即時フィードバック: target 側へ 30% 即時前進（残りは scheduler で ease）
+    currentBpm += (targetBpm - currentBpm) * BPM_INITIAL_JUMP;
+  }
+
   window.SnakeAudio = {
     startBgm, pauseBgm, resumeBgm, stopBgm,
     playEat, playGameOver,
     toggle,
     isEnabled: () => enabled,
+    setLevel,
   };
 })();
