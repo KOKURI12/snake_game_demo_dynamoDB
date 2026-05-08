@@ -221,19 +221,19 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectName}-lambda-sg'
 
-  VPCEndpointSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: VPC Interface Endpoints SG
-      VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort:   443
-          ToPort:     443
-          SourceSecurityGroupId: !Ref LambdaSecurityGroup
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-vpce-sg'
+  # VPCEndpointSecurityGroup:
+  #  Type: AWS::EC2::SecurityGroup
+  #  Properties:
+  #    GroupDescription: VPC Interface Endpoints SG
+  #    VpcId: !Ref VpcId
+  #    SecurityGroupIngress:
+  #      - IpProtocol: tcp
+  #        FromPort:   443
+  #        ToPort:     443
+  #        SourceSecurityGroupId: !Ref LambdaSecurityGroup
+  #    Tags:
+  #      - Key: Name
+  #        Value: !Sub '${ProjectName}-vpce-sg'
 
   RedisSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -252,17 +252,17 @@ Resources:
   # ──────────────────────────────────────────────────────────
   # [ネットワーク] VPC エンドポイント
   # ──────────────────────────────────────────────────────────
-  CloudWatchLogsEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      ServiceName:       !Sub 'com.amazonaws.${AWS::Region}.logs'
-      VpcId:             !Ref VpcId
-      VpcEndpointType:   Interface
-      SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
-      SecurityGroupIds:  [!Ref VPCEndpointSecurityGroup]
-      PrivateDnsEnabled: true
+  # CloudWatchLogsEndpoint:
+  #  Type: AWS::EC2::VPCEndpoint
+  #  Properties:
+  #    ServiceName:       !Sub 'com.amazonaws.${AWS::Region}.logs'
+  #    VpcId:             !Ref VpcId
+  #    VpcEndpointType:   Interface
+  #    SubnetIds:
+  #      - !Ref PrivateSubnet1
+  #      - !Ref PrivateSubnet2
+  #    SecurityGroupIds:  [!Ref VPCEndpointSecurityGroup]
+  #    PrivateDnsEnabled: true
 
   S3GatewayEndpoint:
     Type: AWS::EC2::VPCEndpoint
