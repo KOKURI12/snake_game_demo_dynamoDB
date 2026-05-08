@@ -7,6 +7,19 @@
 
 ---
 
+## このプロジェクトで実現したこと
+
+- 静的フロントエンドを S3 + CloudFront + OAC で安全に配信
+- API Gateway + Lambda によるサーバーレス API を実装
+- DynamoDB の GSI によりランキング取得を scan から query に改善
+- ElastiCache Redis によるランキングキャッシュを導入し、読み取り負荷を軽減
+- RDS 構成から DynamoDB 構成へ移行し、月額コストを削減
+- CloudWatch Logs Interface VPC Endpoint を削除し、VPC 固定費を最適化
+- GitHub Actions + AWS SAM による CI/CD を構築
+- Neon Arcade UI、名前バリデーション、Web Audio API による BGM / 効果音を実装
+
+---
+
 ## バージョン履歴
 
 | バージョン | 内容 | 状態 |
@@ -120,7 +133,8 @@ snake_game_demo_dynamoDB/
 │
 ├── infrastructure/                  # IaC + SAM 設定
 │   ├── template.yaml                # SAM テンプレート(全 AWS リソース定義)
-│   └── samconfig.toml               # SAM デプロイ設定
+│   └── samconfig.toml.example       # SAM デプロイ設定サンプル
+│       # samconfig.toml はローカル専用(.gitignore対象)
 │
 ├── scripts/                         # 運用スクリプト
 │   └── backfill_gsi.py              # DynamoDB GSI バックフィルスクリプト
@@ -245,17 +259,23 @@ get_ranking Lambda
 | `deploy-frontend.yml` | `frontend/**` への push | S3 sync + CloudFront Invalidation |
 | `deploy-sam.yml` | `backend/**` / `infrastructure/**` への push | SAM build + deploy |
 
-### 必要な GitHub Secrets
+### GitHub Actions 認証方式
 
-| シークレット名 | 内容 |
+公開ポートフォリオでは、長期アクセスキーを GitHub Secrets に保存しない方針です。
+本番運用では **GitHub Actions OIDC + IAM Role** により、一時認証情報を取得して AWS へデプロイします。
+
+必要な GitHub Secrets / Variables は以下を想定します。
+
+| 名前 | 内容 |
 |---|---|
-| `AWS_ACCESS_KEY_ID` | デプロイ用 IAM アクセスキー |
-| `AWS_SECRET_ACCESS_KEY` | デプロイ用 IAM シークレットキー |
 | `AWS_REGION` | `ap-northeast-1` |
 | `S3_BUCKET` | フロントエンド配信用 S3 バケット名 |
 | `CLOUDFRONT_DISTRIBUTION_ID` | CloudFront ディストリビューション ID |
 | `SAM_STACK_NAME` | CloudFormation スタック名 |
 | `SAM_S3_BUCKET` | SAM アーティファクト用 S3 バケット名 |
+| `AWS_ROLE_TO_ASSUME` | GitHub Actions から AssumeRole する IAM Role ARN |
+
+> 旧方式として `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` を使うことも可能ですが、公開リポジトリでは OIDC を推奨します。
 
 ---
 

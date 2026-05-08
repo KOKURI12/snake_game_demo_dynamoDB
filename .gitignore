@@ -1,23 +1,18 @@
-# SAM ビルド成果物
 .aws-sam/
+.toml
 
-# Python
 __pycache__/
 *.py[cod]
 *.pyo
 .env
 
-# OS
 .DS_Store
 Thumbs.db
 
-# バックアップ(DynamoDB エクスポート等)
 backup/
 *.bak
 *.bak_*
 
-# レスポンス一時ファイル
 response.json
 
-# Claude スキルのビルド成果物
 .claude/skills/
