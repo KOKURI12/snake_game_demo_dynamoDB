@@ -1,4 +1,4 @@
-﻿# SAM デプロイ設定サンプル
+﻿# SAM デプロイ設定サンプル追加
 # このファイルをコピーして samconfig.toml を作成し、各値を環境に合わせて変更してください
 # cp samconfig.toml.example samconfig.toml
 
