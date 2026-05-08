@@ -1,6 +1,7 @@
 .aws-sam/
 .toml
 infrastructure/samconfig.toml
+frontend/config.js
 
 __pycache__/
 *.py[cod]
@@ -17,4 +18,3 @@ backup/
 response.json
 
 .claude/skills/
-
