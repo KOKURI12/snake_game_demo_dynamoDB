@@ -48,7 +48,7 @@
 
 ### v2.4 ハイライト (Phase 6-A: Special Food System)
 
-商品化に向けた独自性として、特殊餌システム(Special Food)を導入。
+ゲーム性の差別化と継続プレイ性の向上を目的として、特殊餌システム(Special Food)を導入。
 ゲームプレイは従来の通常餌(Normal Core)に加え、Lv5 以降で出現する Slow Core と、Lv6 以降で出現する Rebirth Core を加えた 3種構成となります。
 
 #### Special Food 仕様
@@ -175,15 +175,19 @@ snake_game_demo_dynamoDB/
 │
 ├── frontend/                        # プレゼンテーション層 (S3 + CloudFront)
 │   ├── index.html                   # v2.1 メインページ(rollback 用に保持)
-│   ├── index-v2.html                # v2.2/v2.3 メインページ(現 Default Root Object)
+│   ├── index-v2.html                # v2.2〜v2.4 メインページ(現 Default Root Object)
+│   ├── index-v2.3.html              # v2.3 rollback snapshot
 │   ├── css/
 │   │   ├── style.css                # v2.1 スタイル(rollback 用に保持)
-│   │   └── style-v2.css             # v2.2/v2.3 スタイル
+│   │   ├── style-v2.css             # v2.2〜v2.4 スタイル
+│   │   └── style-v2.3.css           # v2.3 rollback snapshot
 │   └── js/
 │       ├── api.js                   # API Gateway クライアント(共通)
 │       ├── snake.js                 # v2.1 ゲームロジック(rollback 用に保持)
-│       ├── snake-v2.js              # v2.2/v2.3 ゲームロジック
-│       └── audio-v2.js              # Web Audio API 音源モジュール (BGM Micro Ramp 対応)
+│       ├── snake-v2.js              # v2.2〜v2.4 ゲームロジック (Special Food / Dev Mode)
+│       ├── snake-v2.3.js            # v2.3 rollback snapshot
+│       ├── audio-v2.js              # Web Audio API 音源モジュール (BGM Micro Ramp 対応)
+│       └── audio-v2.3.js            # v2.3 rollback snapshot
 │
 ├── backend/                         # アプリケーション層 (API Gateway + Lambda)
 │   ├── post_score/
@@ -228,8 +232,8 @@ snake_game_demo_dynamoDB/
 ```json
 {
   "player_name":   "PLAYER_A",
-  "score":         20,
-  "level_reached": 4
+  "score":         25,
+  "level_reached": 6
 }
 ```
 
@@ -385,6 +389,20 @@ main ──── 本番デプロイ対象(GitHub Actions が自動デプロイ)
 
 > v2.3 から Level 連動で BGM の BPM が段階的に上昇(Micro Ramp で滑らかに加速、Lv 8 以降は 164 BPM 上限)。
 
+### Special Food System(v2.4)
+
+| Core | 出現条件 | 効果 |
+|---|---|---|
+| Normal Core | Lv1〜常時 | score +1、snake.length +1 |
+| Slow Core | Lv5〜 / Lv5到達時に初回確定出現 | score +1、snake.length +1、5秒間 speed × 1.35 |
+| Rebirth Core | Lv6〜 | score +1、snake.length -3、最低長さ3未満にはしない |
+
+- Special Food は最大1個まで出現
+- TTL 7秒で自動消滅
+- 通常餌 / snake / specialFood の重なりを回避
+- pause / resume / retry / game over 時に状態を安全にリセット
+- Dev Mode は `?dev=1` の時だけ有効化し、score submit は無効化
+
 ---
 
 ## コスト
@@ -414,7 +432,8 @@ main ──── 本番デプロイ対象(GitHub Actions が自動デプロイ)
 - Lambda から DynamoDB / ElastiCache への通信は VPC 内で完結
 - CORS は API Gateway レベルで CloudFront ドメインのみ許可
 - IAM ポリシーは最小権限の原則に従い設定
-- GitHub Secrets で AWS 認証情報を管理(コードへのハードコード禁止)
+- GitHub Actions は OIDC + IAM Role により一時認証情報を利用し、長期アクセスキーの保存を避ける
+- AWS 認証情報や機密値はコードへハードコードしない
 
 ---
 

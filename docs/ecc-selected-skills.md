@@ -202,3 +202,74 @@ ECC hooks は `templates/.claude/settings.json` には入れない。
   - `frontend/index.html`
   - `frontend/css/style.css`
   - `frontend/js/snake.js`
+
+### Phase 6-A / v2.4
+
+- `frontend/index-v2.html`、`frontend/css/style-v2.css`、`frontend/js/snake-v2.js`、`README.md` を変更
+- Special Food System を追加
+  - Normal Core / Slow Core / Rebirth Core の3種構成を導入
+  - Lv5到達時に Slow Core を1回だけ確定出現させる intro spawn を追加
+  - Slow Core:
+    - Lv5以上で出現
+    - score +1
+    - snake.length +1
+    - 5秒間 speed × 1.35
+    - SLOW chip に残秒数を表示
+  - Rebirth Core:
+    - Lv6以上で出現候補
+    - Lv6以上の抽選比率を Slow / Rebirth = 40 / 60 に調整
+    - score +1
+    - snake.length -3
+    - 最低長さ3未満にはしない
+    - REBIRTH -3 chip を約1秒表示
+  - Special Food は最大1個まで出現
+  - 通常餌 / snake本体 / specialFood の重なり回避を実装
+  - TTL 7秒、自動消滅、pause / resume / retry / game over の状態リセットに対応
+  - frame-delta ベースの timer により pause復帰 / tab復帰時の delta 暴走を防止
+- Dev Mode を追加
+  - `?dev=1` の時だけ有効
+  - Jump Lv5 / Jump Lv6 / Spawn Slow / Spawn Rebirth / Clear Special
+  - Shift + 5 / 6 / S / R / X の検証用ショートカット
+  - Dev Mode中は score submit を無効化
+  - 通常URLでは Dev UI 非表示、ショートカット無効
+- PC / iPhone Safari 同一Wi-Fi環境で実機確認済み
+- 通常モード・Dev Mode ともに表示・操作・BGM・Ranking・D-pad への影響なし
+
+#### Phase 6-A / v2.4 実機確認結果
+
+- Lv1〜Lv4で特殊餌が出現しないことを確認
+- Lv5到達時のSlow Core初回確定出現を確認
+- Slow Core取得、5秒後復帰、pause/resume、retryを確認
+- Lv6以降のSlow/Rebirth抽選を確認
+- Rebirth Core取得時の score +1 / snake.length -3 / REBIRTH -3 chip を確認
+- snake.length=3 でRebirthを取得しても最低長さ未満にならないことを確認
+- 7秒間取得されない場合の自動消滅を確認
+- game over → retry で状態が完全リセットされることを確認
+- mobile iPhone SafariでDev panelのタップ操作と通常操作への影響なしを確認
+- BGM toggle / Ranking / Score API / mobile操作への影響なしを確認
+- Dev Mode中のscore submit無効化を確認
+
+#### Phase 6-A / v2.4 で変更しなかったもの
+
+- `frontend/js/audio-v2.js`
+- `backend/`
+- `infrastructure/`
+- Ranking API
+- Score登録API
+- GitHub Actions
+- v2.1 rollback files
+  - `frontend/index.html`
+  - `frontend/css/style.css`
+  - `frontend/js/snake.js`
+- v2.3 rollback snapshot files
+  - `frontend/index-v2.3.html`
+  - `frontend/css/style-v2.3.css`
+  - `frontend/js/snake-v2.3.js`
+  - `frontend/js/audio-v2.3.js`
+
+#### Phase 6-A / v2.4 balance notes
+
+- 初期実装では Rebirth Core の snake.length -1 が弱く感じられたため、実機確認後に snake.length -3 へ調整
+- Lv6以降でRebirthの価値を高めるため、Slow / Rebirth 抽選比率を 40 / 60 に調整
+- Special Foodの出現頻度を 14秒間隔 / 55% 確率、失敗時4秒retry に調整
+- これにより、高レベル帯で高得点を狙いやすい戦略性を追加
