@@ -42,6 +42,9 @@
         </div>
       </div>
 
+      <!-- Phase 6-A: Special Food 状態表示 chip -->
+      <div id="special-status" class="special-chip" aria-live="polite" hidden></div>
+
       <!-- キャンバス -->
       <div id="game-wrap">
         <canvas id="game-canvas" width="400" height="400">
@@ -76,6 +79,16 @@
         <div class="dpad-center"></div>
         <button class="dpad-btn" id="btn-down"  aria-label="下">&#9660;</button>
         <div class="dpad-center"></div>
+      </div>
+
+      <!-- Phase 6-A Dev Mode panel (?dev=1 のときだけ JS で hidden 解除) -->
+      <div id="dev-panel" class="dev-panel" hidden>
+        <span class="dev-label">DEV TEST MODE</span>
+        <button type="button" data-dev="jump5">Jump Lv5</button>
+        <button type="button" data-dev="jump6">Jump Lv6</button>
+        <button type="button" data-dev="spawnSlow">Spawn Slow</button>
+        <button type="button" data-dev="spawnRebirth">Spawn Rebirth</button>
+        <button type="button" data-dev="clearSpecial">Clear Special</button>
       </div>
 
     </div><!-- /#app -->

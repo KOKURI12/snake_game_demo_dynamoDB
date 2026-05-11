@@ -27,6 +27,32 @@
 
   const LEVEL_FLASH_MS = 800;  // v2: level up ハイライト継続時間
 
+  // Phase 6-A: Special Food
+  const SPECIAL_FOOD_TTL_MS         = 7000;
+  const SPECIAL_FOOD_SPAWN_DELAY_MS = 14000;   // v2.4: 22000 → 14000（出現頻度 up）
+  const SPECIAL_FOOD_SPAWN_RETRY_MS = 4000;    // v2.4: 5000 → 4000
+  const SPECIAL_FOOD_SPAWN_PROB     = 0.55;    // v2.4: 0.35 → 0.55
+  const SLOW_EFFECT_DURATION_MS     = 5000;
+  const SLOW_SPEED_MULT             = 1.35;
+  const SLOW_MIN_LV                 = 5;
+  const REBIRTH_MIN_LV              = 6;
+  const MIN_SNAKE_LENGTH            = 3;
+  const REBIRTH_TRIM_COUNT          = 3;       // v2.4: Rebirth で snake を縮める segment 数（-1 → -3）
+  const REBIRTH_WEIGHT_LV6_PLUS     = 0.6;     // v2.4: Lv6+ で Rebirth が選ばれる確率（残り 0.4 は Slow）
+  const REBIRTH_FLASH_MS            = 1000;
+  const COLOR_SLOW                  = '#ff9b3d';
+  const COLOR_REBIRTH               = '#7fffaf';
+  const FRAME_DELTA_MAX_MS          = 200;   // resume 直後の delta 暴走 guard
+
+  // Phase 6-A Dev Mode: ?dev=1 クエリで有効化
+  const isDevMode = (() => {
+    try {
+      return new URLSearchParams(window.location.search).get('dev') === '1';
+    } catch (_) {
+      return false;
+    }
+  })();
+
   /* ── DOM ── */
   const appEl     = document.getElementById('app');
   const canvas    = document.getElementById('game-canvas');
@@ -51,12 +77,23 @@
   const rankingEmpty  = document.getElementById('ranking-empty');
   const rankingStatus = document.getElementById('ranking-status');
 
+  // Phase 6-A: Special Food UI
+  const specialStatusEl = document.getElementById('special-status');
+
   /* ── State ── */
   let snake, dir, nextDir, food;
   let score = 0, hi = 0, lvl = 1, speed = BASE_SPEED;
   let state = 'idle';
   let rafId = null, lastTs = 0;
   let flashTimer = null;
+
+  // Phase 6-A: Special Food state
+  let specialFood         = null;   // { x, y, type: 'slow' | 'rebirth', ttlMs }
+  let specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
+  let slowEffectMs        = 0;
+  let rebirthFlashMs      = 0;
+  let lastFrameTs         = 0;     // updateSpecialTimers 用 per-frame delta tracker
+  let hasSpawnedLevel5IntroSlow = false;   // Lv5 到達時の 1 回限り force spawn フラグ
 
   /* ── Audio shim（SnakeAudio 未ロード時でも安全に動く） ── */
   const Audio = {
@@ -128,6 +165,14 @@
     lvl     = 1;
     speed   = BASE_SPEED;
     lastTs  = 0;
+    // Phase 6-A: Special Food state を完全リセット（前ゲームの状態を持ち越さない）
+    specialFood         = null;
+    specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
+    slowEffectMs        = 0;
+    rebirthFlashMs      = 0;
+    lastFrameTs         = 0;
+    hasSpawnedLevel5IntroSlow = false;
+    updateSpecialStatus();
     placeFood();
     updateHUD();
     levelEl.textContent = '1';
@@ -150,6 +195,8 @@
   function resumeGame() {
     if (state !== 'paused') return;
     lastTs = 0;
+    // Phase 6-A: per-frame delta tracker もリセット（pause 中の経過時間を Special timer に流入させない）
+    lastFrameTs = 0;
     setState('running');
     rafId = requestAnimationFrame(loop);
     Audio.resume();
@@ -167,14 +214,245 @@
         x: Math.floor(Math.random() * COLS),
         y: Math.floor(Math.random() * ROWS)
       };
-    } while (snake.some(s => s.x === pos.x && s.y === pos.y));
+    } while (
+      snake.some(s => s.x === pos.x && s.y === pos.y) ||
+      (specialFood && specialFood.x === pos.x && specialFood.y === pos.y)
+    );
     food = pos;
+  }
+
+  /* ── Phase 6-A: Special Food ── */
+  function findEmptyCell() {
+    for (let i = 0; i < 100; i++) {
+      const x = Math.floor(Math.random() * COLS);
+      const y = Math.floor(Math.random() * ROWS);
+      if (food && food.x === x && food.y === y) continue;
+      // Phase 6-A: snake が未初期化（idle / over 状態）でも安全に動作
+      if (snake && snake.some(s => s.x === x && s.y === y)) continue;
+      return { x, y };
+    }
+    return null;
+  }
+
+  function spawnSpecialFood() {
+    const candidates = [];
+    if (lvl >= SLOW_MIN_LV)    candidates.push('slow');
+    if (lvl >= REBIRTH_MIN_LV) candidates.push('rebirth');
+    if (candidates.length === 0) {
+      specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
+      return;
+    }
+    const cell = findEmptyCell();
+    if (!cell) {
+      specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_RETRY_MS;
+      return;
+    }
+    // v2.4: Lv6+ で candidates が ['slow', 'rebirth'] の場合は重み付き抽選（rebirth 60% / slow 40%）
+    let type;
+    if (candidates.length === 1) {
+      type = candidates[0];
+    } else {
+      type = Math.random() < REBIRTH_WEIGHT_LV6_PLUS ? 'rebirth' : 'slow';
+    }
+    specialFood = { x: cell.x, y: cell.y, type, ttlMs: SPECIAL_FOOD_TTL_MS };
+    updateSpecialStatus();
+  }
+
+  // Phase 6-A: 確率抽選をバイパスして特定 type を強制 spawn（Lv5 intro / dev mode で使用）
+  function spawnSpecialFoodForced(type) {
+    const cell = findEmptyCell();
+    if (!cell) return false;
+    specialFood = { x: cell.x, y: cell.y, type, ttlMs: SPECIAL_FOOD_TTL_MS };
+    updateSpecialStatus();
+    return true;
+  }
+
+  function despawnSpecialFood() {
+    specialFood = null;
+    specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
+    updateSpecialStatus();
+  }
+
+  // dispatch（将来 Phase 拡張時の hook ポイント）
+  function applySpecialFoodEffect(type) {
+    if (type === 'slow')    applySlowEffect();
+    if (type === 'rebirth') applyRebirthEffect();
+  }
+
+  function applySlowEffect() {
+    // 重複取得時は加算せず常にリセット
+    slowEffectMs = SLOW_EFFECT_DURATION_MS;
+  }
+
+  function applyRebirthEffect() {
+    // snake.length 操作は update() 内で行う（pre-length guard を一元管理）
+    // ここでは chip flash トリガーのみ
+    rebirthFlashMs = REBIRTH_FLASH_MS;
+  }
+
+  function updateSpecialTimers(deltaMs) {
+    // specialFood TTL
+    if (specialFood) {
+      specialFood.ttlMs -= deltaMs;
+      if (specialFood.ttlMs <= 0) {
+        despawnSpecialFood();
+      } else {
+        updateSpecialStatus();   // 残秒数表示更新
+      }
+    } else if (lvl >= SLOW_MIN_LV) {
+      // 抽選 timer
+      specialSpawnDelayMs -= deltaMs;
+      if (specialSpawnDelayMs <= 0) {
+        if (Math.random() < SPECIAL_FOOD_SPAWN_PROB) {
+          spawnSpecialFood();
+        } else {
+          // 失敗時は短い retry delay
+          specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_RETRY_MS;
+        }
+      }
+    }
+    // Slow 効果残時間
+    if (slowEffectMs > 0) {
+      slowEffectMs -= deltaMs;
+      if (slowEffectMs <= 0) slowEffectMs = 0;
+      updateSpecialStatus();
+    }
+    // REBIRTH chip flash 残時間
+    if (rebirthFlashMs > 0) {
+      rebirthFlashMs -= deltaMs;
+      if (rebirthFlashMs <= 0) {
+        rebirthFlashMs = 0;
+        updateSpecialStatus();
+      }
+    }
+  }
+
+  function updateSpecialStatus() {
+    if (!specialStatusEl) return;
+    // 表示優先順位: REBIRTH flash > Slow effect > specialFood ttl > none
+    if (rebirthFlashMs > 0) {
+      specialStatusEl.textContent = 'REBIRTH -' + REBIRTH_TRIM_COUNT;
+      specialStatusEl.className = 'special-chip is-rebirth';
+      specialStatusEl.hidden = false;
+      return;
+    }
+    if (slowEffectMs > 0) {
+      specialStatusEl.textContent = 'SLOW ' + Math.ceil(slowEffectMs / 1000) + 's';
+      specialStatusEl.className = 'special-chip is-slow';
+      specialStatusEl.hidden = false;
+      return;
+    }
+    if (specialFood) {
+      if (specialFood.type === 'slow') {
+        specialStatusEl.textContent = 'SLOW ' + Math.ceil(specialFood.ttlMs / 1000) + 's';
+        specialStatusEl.className = 'special-chip is-slow';
+      } else {
+        specialStatusEl.textContent = 'REBIRTH ' + Math.ceil(specialFood.ttlMs / 1000) + 's';
+        specialStatusEl.className = 'special-chip is-rebirth';
+      }
+      specialStatusEl.hidden = false;
+      return;
+    }
+    specialStatusEl.textContent = '';
+    specialStatusEl.hidden = true;
+  }
+
+  function drawSpecialFood() {
+    if (!specialFood) return;
+    const color = specialFood.type === 'slow' ? COLOR_SLOW : COLOR_REBIRTH;
+    const label = specialFood.type === 'slow' ? 'S' : 'R';
+    const px = specialFood.x * SZ + SZ / 2;
+    const py = specialFood.y * SZ + SZ / 2;
+    const r  = SZ / 2 - 3;
+    // glow
+    const grad = ctx.createRadialGradient(px, py, 1, px, py, r + 4);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(px, py, r + 4, 0, Math.PI * 2);
+    ctx.fill();
+    // body
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+    // label
+    ctx.fillStyle = '#0a0e1a';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, px, py);
+  }
+
+  /* ── Phase 6-A Dev Mode（?dev=1 で有効化、検証専用） ── */
+  function devJumpToLevel(targetLvl) {
+    score = (targetLvl - 1) * 5;
+    if (score > hi) hi = score;
+    lvl   = Math.max(1, Math.min(targetLvl, 10));
+    speed = Math.max(MIN_SPEED, BASE_SPEED - lvl * 15);
+    updateHUD();
+    if (levelEl) levelEl.textContent = String(lvl);
+    Audio.setLevel(lvl);
+  }
+  function devJumpToLevel5() {
+    devJumpToLevel(5);
+    if (specialFood) { specialFood = null; updateSpecialStatus(); }
+    if (spawnSpecialFoodForced('slow')) {
+      hasSpawnedLevel5IntroSlow = true;
+    }
+  }
+  function devJumpToLevel6() {
+    devJumpToLevel(6);
+    if (specialFood) { specialFood = null; updateSpecialStatus(); }
+    spawnSpecialFoodForced('rebirth');
+    // Lv5 intro spawn を skip した扱いにし、後で意図せず force spawn しないようにする
+    hasSpawnedLevel5IntroSlow = true;
+  }
+  function devSpawnSlow() {
+    if (specialFood) { specialFood = null; updateSpecialStatus(); }
+    spawnSpecialFoodForced('slow');
+  }
+  function devSpawnRebirth() {
+    if (specialFood) { specialFood = null; updateSpecialStatus(); }
+    spawnSpecialFoodForced('rebirth');
+  }
+  function devClearSpecial() {
+    specialFood         = null;
+    slowEffectMs        = 0;
+    rebirthFlashMs      = 0;
+    specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
+    updateSpecialStatus();
+  }
+  function initDevMode() {
+    const devPanel = document.getElementById('dev-panel');
+    if (devPanel) devPanel.hidden = false;
+    const map = {
+      jump5:        devJumpToLevel5,
+      jump6:        devJumpToLevel6,
+      spawnSlow:    devSpawnSlow,
+      spawnRebirth: devSpawnRebirth,
+      clearSpecial: devClearSpecial,
+    };
+    document.querySelectorAll('[data-dev]').forEach(btn => {
+      const action = btn.getAttribute('data-dev');
+      if (map[action]) btn.addEventListener('click', map[action]);
+    });
   }
 
   /* ── Game loop ── */
   function loop(ts) {
     rafId = requestAnimationFrame(loop);
-    if (ts - lastTs < speed) return;
+    // Phase 6-A: per-frame delta for special timers (clamp で resume 直後 / tab 復帰時の暴走 guard)
+    if (lastFrameTs > 0) {
+      const frameDelta = Math.min(ts - lastFrameTs, FRAME_DELTA_MAX_MS);
+      if (frameDelta > 0) updateSpecialTimers(frameDelta);
+    }
+    lastFrameTs = ts;
+
+    // Phase 6-A: Slow 効果中は実効 speed を係数倍に
+    const effectiveSpeed = slowEffectMs > 0 ? speed * SLOW_SPEED_MULT : speed;
+    if (ts - lastTs < effectiveSpeed) return;
     lastTs = ts;
     update();
     draw();
@@ -196,7 +474,10 @@
 
     snake.unshift(head);
 
+    // Normal Core 衝突
+    let normalAte = false;
     if (head.x === food.x && head.y === food.y) {
+      normalAte = true;
       score++;
       if (score > hi) hi = score;
       updateHUD();
@@ -210,11 +491,44 @@
           triggerLevelFlash();
           // Phase 5-A: Level 連動 BPM（Micro Ramp で 30% 即時 + 残り ease）
           Audio.setLevel(lvl);
+          // Phase 6-A: Lv5 到達時に Slow Core を 1 回だけ 100% force spawn（intro 体験用）
+          if (lvl === SLOW_MIN_LV && !hasSpawnedLevel5IntroSlow && !specialFood) {
+            if (spawnSpecialFoodForced('slow')) {
+              hasSpawnedLevel5IntroSlow = true;
+            }
+          }
         }
       }
       placeFood();
-    } else {
-      snake.pop();
+    }
+
+    // Phase 6-A: Special Food 衝突
+    let specialType = null;
+    if (specialFood && head.x === specialFood.x && head.y === specialFood.y) {
+      specialType = specialFood.type;
+      score++;
+      if (score > hi) hi = score;
+      updateHUD();
+      Audio.eat();
+      applySpecialFoodEffect(specialType);
+      despawnSpecialFood();
+    }
+
+    // Phase 6-A / v2.4: 長さ調整
+    // - Normal eat        → grow +1 (skip pop)
+    // - Slow eat          → grow +1 (skip pop) — 通常 food と同じ growth
+    // - Rebirth eat       → preLen から REBIRTH_TRIM_COUNT 分縮める。
+    //                      MIN_SNAKE_LENGTH 未満にはしない（preLen が小さい時は 3 で頭打ち）
+    // - 何も食べていない → normal pop = 据え置き
+    const ateAndGrow = normalAte || specialType === 'slow';
+    if (!ateAndGrow) {
+      if (specialType === 'rebirth') {
+        const preLen = snake.length - 1;   // unshift 前の length
+        const targetLen = Math.max(preLen - REBIRTH_TRIM_COUNT, MIN_SNAKE_LENGTH);
+        while (snake.length > targetLen) snake.pop();
+      } else {
+        snake.pop();   // 通常の steady-state pop
+      }
     }
   }
 
@@ -314,6 +628,9 @@
     ctx.beginPath();
     ctx.arc(fx - r * 0.35, fy - r * 0.35, r * 0.3, 0, Math.PI * 2);
     ctx.fill();
+
+    // Phase 6-A: Special Food 描画（Normal Core より後ろに描画）
+    drawSpecialFood();
   }
 
   function drawIdle() {
@@ -344,6 +661,13 @@
     cancelAnimationFrame(rafId);
     setState('over');
     clearLevelFlash();
+    // Phase 6-A: 死亡時に Special Food / 効果 / chip を完全リセット
+    specialFood         = null;
+    slowEffectMs        = 0;
+    rebirthFlashMs      = 0;
+    specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
+    hasSpawnedLevel5IntroSlow = false;
+    updateSpecialStatus();
     drawGameOverOverlay();
     Audio.stop();
     Audio.over();
@@ -373,6 +697,15 @@
     if (finalScore === 0) return;
     modalScoreEl.textContent = finalScore;
     playerNameEl.value = '';
+    // Phase 6-A Dev Mode: スコア登録を視覚的に無効化（ボタンの状態 + 案内文）
+    if (isDevMode) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'DEV MODE';
+      setPlayerNameError('DEV MODE: スコア登録は無効（本番ranking には送信されません）');
+    } else {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'SUBMIT';
+    }
     scoreModal.removeAttribute('hidden');
     setTimeout(() => playerNameEl.focus(), 100);
   }
@@ -448,6 +781,11 @@
   }
 
   async function handleScoreSubmit() {
+    // Phase 6-A Dev Mode: スコア登録を完全 block（API 送信前に return）
+    if (isDevMode) {
+      setPlayerNameError('DEV MODE: スコア登録は無効です');
+      return;
+    }
     const result = validatePlayerName(playerNameEl.value);
     if (!result.ok) {
       if (result.reason === 'empty') {
@@ -538,6 +876,14 @@
 
   /* ── Input: Keyboard ── */
   document.addEventListener('keydown', (e) => {
+    // Phase 6-A Dev Mode: Shift+5/6/S/R/X ショートカット（dev mode 限定）
+    if (isDevMode && e.shiftKey) {
+      if (e.code === 'Digit5') { e.preventDefault(); devJumpToLevel5(); return; }
+      if (e.code === 'Digit6') { e.preventDefault(); devJumpToLevel6(); return; }
+      if (e.code === 'KeyS')   { e.preventDefault(); devSpawnSlow();    return; }
+      if (e.code === 'KeyR')   { e.preventDefault(); devSpawnRebirth(); return; }
+      if (e.code === 'KeyX')   { e.preventDefault(); devClearSpecial(); return; }
+    }
     if (e.key === 'Escape' || e.key === 'Esc') {
       e.preventDefault();
       if (scoreModal && !scoreModal.hidden) { closeModal(); return; }
@@ -642,5 +988,7 @@
   setupCanvas();
   drawIdle();
   loadRanking();
+  // Phase 6-A Dev Mode: ?dev=1 のときだけ Dev UI とショートカットを有効化
+  if (isDevMode) initDevMode();
 
 })();

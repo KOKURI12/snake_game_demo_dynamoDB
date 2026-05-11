@@ -28,7 +28,8 @@
 | v2.0 | RDS → DynamoDB 移行、VPC 撤廃、コスト最適化 | リリース済み |
 | v2.1 | DynamoDB GSI 追加(scan → query 移行)、ElastiCache Redis 導入 | リリース済み |
 | v2.2 | UI 改修 + BGM / 効果音追加(ui-audio-v2) | リリース済み |
-| **v2.3** | **Neon Arcade UI 改修、Player Name validation 強化、BGM Level連動 BPM + Micro Ramp 追加** | **リリース済み** |
+| v2.3 | Neon Arcade UI 改修、Player Name validation 強化、BGM Level連動 BPM + Micro Ramp 追加 | リリース済み |
+| **v2.4** | **Phase 6-A: Special Food System 追加(Slow Core / Rebirth Core / Dev Mode)** | **実装・実機確認済み** |
 
 ### v2.2 ハイライト
 
@@ -44,6 +45,67 @@
 - Player Name validation(URL / 連絡先 / 不適切表現の最小検出 + 多言語 policy note)
 - BGM Level 連動 BPM (108→164、Micro Ramp で滑らかに加速)
 - `prefers-reduced-motion` 全面対応
+
+### v2.4 ハイライト (Phase 6-A: Special Food System)
+
+商品化に向けた独自性として、特殊餌システム(Special Food)を導入。
+ゲームプレイは従来の通常餌(Normal Core)に加え、Lv5 以降で出現する Slow Core と、Lv6 以降で出現する Rebirth Core を加えた 3種構成となります。
+
+#### Special Food 仕様
+
+- **Normal Core(既存の赤い通常餌)**
+  - Lv1 から常時出現
+  - 取得時 score +1、snake.length +1
+
+- **Slow Core**
+  - Lv5 以上で出現
+  - Lv5 到達時に 1 回だけ確定出現(intro 体験用)
+  - 取得時 score +1、snake.length +1
+  - 5 秒間 speed × 1.35 で減速
+  - SLOW chip 表示(残秒数)
+
+- **Rebirth Core**
+  - Lv6 以上で出現候補
+  - Lv6 以上の抽選比率: Slow / Rebirth = 40 / 60
+  - 取得時 score +1、snake.length -3
+  - 最低長さ `MIN_SNAKE_LENGTH = 3` 未満にはしない
+  - REBIRTH -3 chip を約 1 秒表示
+
+#### 共通仕様
+
+- Special Food は同時に最大 1 個まで
+- 通常餌 / snake 本体 / specialFood の重なりを回避
+- TTL 7 秒で自動消滅
+- 出現抽選は 14 秒間隔 / 55% 確率、失敗時は 4 秒で retry
+- pause / resume / retry / game over で状態を安全にリセット
+- frame-delta ベースの timer により tab 復帰 / pause 復帰時の暴走を防止
+
+#### Dev Mode (`?dev=1`)
+
+検証専用の開発モード。URL クエリ `?dev=1` 付与時のみ有効化されます。
+
+- 開発者用パネル表示: Jump Lv5 / Jump Lv6 / Spawn Slow / Spawn Rebirth / Clear Special
+- キーボードショートカット: `Shift + 5 / 6 / S / R / X`
+- Dev Mode 中は score submit を無効化(本番ranking には送信されない)
+- 通常 URL では Dev UI 非表示、ショートカットも無効
+
+#### v2.4 で変更したファイル
+
+- `frontend/index-v2.html`(Special chip / Dev panel DOM 追加)
+- `frontend/css/style-v2.css`(special-chip / dev-panel スタイル追加)
+- `frontend/js/snake-v2.js`(Special Food 本体ロジック / Dev Mode 実装)
+- `README.md`(本ドキュメント)
+
+#### v2.4 で変更しなかったもの
+
+- `frontend/js/audio-v2.js`(BGM / 効果音モジュール)
+- `backend/`(Lambda / API 仕様)
+- `infrastructure/`(SAM テンプレート)
+- Ranking API / Score 登録 API
+- v2.1 rollback files: `frontend/index.html`, `css/style.css`, `js/snake.js`
+- v2.3 rollback snapshot files: `frontend/index-v2.3.html`, `css/style-v2.3.css`, `js/snake-v2.3.js`, `js/audio-v2.3.js`
+
+> v2.3 rollback snapshot を S3 上に共存させているため、CloudFront の Default Root Object を `index-v2.3.html` に切り替えるだけで v2.4 → v2.3 へ即時 rollback 可能。
 
 詳細な作業ログ・Phase 単位の検証結果は [docs/ecc-selected-skills.md](docs/ecc-selected-skills.md) を参照。
 
