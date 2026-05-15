@@ -48,11 +48,15 @@
   const FEVER_DURATION_MS           = 6000;  // Fever 継続時間（6 秒）
   const FEVER_NORMAL_SCORE          = 2;     // Fever 中の Normal Core score 加算量（通常 +1 → Fever +2）
 
-  // Phase 6-B / v2.5 UX: Rebirth Tail Highlight（trim ghost / Neon Dissolve 演出）
-  const TRIM_GHOST_DURATION_MS      = 500;             // fade 継続時間（0.5 秒）
-  const COLOR_TRIM_GHOST_RING       = '#7fffd8';       // mint/cyan 系の細い ring
-  const COLOR_TRIM_GHOST_GLOW       = '#a8fff0';       // 内側 white-mint glow
-  const COLOR_TRIM_GHOST_SPARK      = '#ffffff';       // 補助の小 spark
+  // Phase 6-B / v2.5 UX: Rebirth Tail Highlight（Neon Ash Dissolve / Digital Dust Fade）
+  // v2.5.1: 高速 Lv で見えにくかった件への視認性チューニング
+  const TRIM_GHOST_DURATION_MS      = 900;             // 全体の fade 継続時間（700 → 900ms）
+  const TRIM_GHOST_SEGMENT_PHASE_MS = 150;             // 最初に segment shape を見せる時間（100 → 150ms）
+  const TRIM_GHOST_PARTICLE_COUNT   = 9;               // 1 segment あたりの粒子数（7 → 9）
+  const COLOR_TRIM_GHOST_SEGMENT    = '#bfeaff';       // pale cyan の segment ghost
+  const COLOR_TRIM_GHOST_PARTICLE_A = '#7fe8ff';       // 粒子色 A（cyan）
+  const COLOR_TRIM_GHOST_PARTICLE_B = '#ffffff';       // 粒子色 B（white）
+  const COLOR_TRIM_GHOST_PARTICLE_C = '#d8f3ff';       // 粒子色 C（pale blue）
 
   // Phase 6-B / v2.5: Rebirth Spawn Bias / Combo Charge（Lv6+ 限定）
   const COMBO_MIN_LV                = 6;       // combo が有効になる最低レベル
@@ -61,6 +65,12 @@
   const COMBO_BIAS_STEP             = 0.05;    // combo 1 ごとの Rebirth bias 加算（+5%）
   const REBIRTH_WEIGHT_MAX          = 0.85;    // Rebirth 比率上限（Slow を最低 15% 残す）
   const COMBO_DISPLAY_MIN           = 2;       // COMBO chip を表示する閾値
+
+  // Phase 6-B / v2.5.1: Rebirth Charge / Guarantee System（Lv6+ 限定）
+  // 小数誤差を避けるため integer step 管理（0〜10）
+  const REBIRTH_CHARGE_MIN_LV       = 6;       // Charge が有効になる最低レベル
+  const REBIRTH_CHARGE_MAX_STEPS    = 10;      // Charge 上限（10 個取得で REBIRTH READY）
+  const REBIRTH_CHARGE_DISPLAY_MIN  = 5;       // CHARGE chip を表示し始める step（50% 相当）
 
   // Phase 6-A Dev Mode: ?dev=1 クエリで有効化
   const isDevMode = (() => {
@@ -101,6 +111,7 @@
   const buffRebirthEl = document.getElementById('buff-rebirth');
   const buffPickupEl  = document.getElementById('buff-pickup');
   const buffComboEl   = document.getElementById('buff-combo');
+  const buffChargeEl  = document.getElementById('buff-charge');
 
   /* ── State ── */
   let snake, dir, nextDir, food;
@@ -118,6 +129,7 @@
   let trimGhosts          = [];    // Phase 6-B / v2.5 UX: Rebirth tail ghost { x, y, ageMs }[]（描画専用）
   let comboCount          = 0;     // Phase 6-B / v2.5: Normal Core 連続取得 combo（0〜COMBO_MAX）
   let comboWindowMs       = 0;     // combo 維持の残時間（frame-delta 管理）
+  let rebirthChargeSteps  = 0;     // Phase 6-B / v2.5.1: Rebirth Charge 累積（integer 0〜REBIRTH_CHARGE_MAX_STEPS）
   let lastFrameTs         = 0;     // updateSpecialTimers 用 per-frame delta tracker
   let hasSpawnedLevel5IntroSlow = false;   // Lv5 到達時の 1 回限り force spawn フラグ
 
@@ -200,6 +212,7 @@
     trimGhosts          = [];
     comboCount          = 0;
     comboWindowMs       = 0;
+    rebirthChargeSteps  = 0;
     lastFrameTs         = 0;
     hasSpawnedLevel5IntroSlow = false;
     updateBuffBar();
@@ -251,6 +264,11 @@
     food = pos;
   }
 
+  // Phase 6-B / v2.5.1: Rebirth Charge が READY 状態か判定（Lv6+ かつ steps が上限到達）
+  function isRebirthReady() {
+    return lvl >= REBIRTH_CHARGE_MIN_LV && rebirthChargeSteps >= REBIRTH_CHARGE_MAX_STEPS;
+  }
+
   /* ── Phase 6-A: Special Food ── */
   function findEmptyCell() {
     for (let i = 0; i < 100; i++) {
@@ -279,9 +297,12 @@
     }
     // v2.4: Lv6+ で candidates が ['slow', 'rebirth'] の場合は重み付き抽選（rebirth 60% / slow 40%）
     // Phase 6-B / v2.5: combo に応じて Rebirth bias を min(0.6 + combo*0.05, 0.85) まで上げる
+    // Phase 6-B / v2.5.1: REBIRTH READY 中は Combo bias を skip して Rebirth を確定
     let type;
     if (candidates.length === 1) {
       type = candidates[0];
+    } else if (isRebirthReady() && candidates.indexOf('rebirth') !== -1) {
+      type = 'rebirth';
     } else {
       const weight = Math.min(
         REBIRTH_WEIGHT_LV6_PLUS + comboCount * COMBO_BIAS_STEP,
@@ -343,7 +364,12 @@
       // 抽選 timer
       specialSpawnDelayMs -= deltaMs;
       if (specialSpawnDelayMs <= 0) {
-        if (Math.random() < SPECIAL_FOOD_SPAWN_PROB) {
+        // Phase 6-B / v2.5.1: REBIRTH READY 中は spawn probability を bypass し、確定で spawn 発火
+        // type selection 側で Rebirth が確定的に選ばれる
+        if (isRebirthReady()) {
+          spawnSpecialFood();
+          specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
+        } else if (Math.random() < SPECIAL_FOOD_SPAWN_PROB) {
           spawnSpecialFood();
         } else {
           // 失敗時は短い retry delay
@@ -443,57 +469,76 @@
         buffComboEl.hidden = true;
       }
     }
+    // Phase 6-B / v2.5.1: CHARGE chip（Lv6+ で steps>=5 のとき表示、上限到達で REBIRTH READY に切替）
+    if (buffChargeEl) {
+      if (lvl >= REBIRTH_CHARGE_MIN_LV && rebirthChargeSteps >= REBIRTH_CHARGE_DISPLAY_MIN) {
+        if (rebirthChargeSteps >= REBIRTH_CHARGE_MAX_STEPS) {
+          buffChargeEl.textContent = 'REBIRTH READY';
+        } else {
+          buffChargeEl.textContent = 'CHARGE ' + (rebirthChargeSteps * 10) + '%';
+        }
+        buffChargeEl.hidden = false;
+      } else {
+        buffChargeEl.textContent = '';
+        buffChargeEl.hidden = true;
+      }
+    }
   }
 
-  // Phase 6-B / v2.5 UX: Rebirth で削除された tail segment を Neon Dissolve 演出で fade out
+  // Phase 6-B / v2.5 UX: Rebirth で削除された tail を Neon Ash Dissolve / Digital Dust Fade で描画
   // 描画専用：collision / snake 本体ロジックには影響しない
-  // 構成: 細い mint ring + 小さな white-mint glow + 短い diagonal slash + 微小 spark
-  // 時間経過で alpha down + scale down（尻尾がデータ化して消える表現）
+  // 構成:
+  //   - phase 1 (0〜100ms): segment shape を薄い角丸四角として残し、軽く発光
+  //   - phase 2 (100ms〜700ms): 粒子が上方向へほどけて drift、後半は外側へ散って fade out
+  // 粒子の random 値は生成時（createTrimGhost）に固定済み → 毎フレームの揺らぎ・チラつきなし
   function drawTrimGhosts() {
     if (trimGhosts.length === 0) return;
+    const particleColors = [
+      COLOR_TRIM_GHOST_PARTICLE_A,
+      COLOR_TRIM_GHOST_PARTICLE_B,
+      COLOR_TRIM_GHOST_PARTICLE_C,
+    ];
     ctx.save();
     for (let i = 0; i < trimGhosts.length; i++) {
       const g = trimGhosts[i];
       const t = g.ageMs / TRIM_GHOST_DURATION_MS;   // 0 → 1
       if (t >= 1) continue;
-      const alpha = Math.max(0, 1 - t);
-      const scale = 1 - t * 0.35;                   // 0.5 秒で 1.0 → 0.65 へ収束
-      const px = g.x * SZ + SZ / 2;
-      const py = g.y * SZ + SZ / 2;
-      const rBase = SZ / 2 - 3;
-      const r = rBase * scale;
-      // (1) 細い mint/cyan の outline ring（主役）
-      ctx.globalAlpha = alpha * 0.7;
-      ctx.strokeStyle = COLOR_TRIM_GHOST_RING;
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(px, py, r, 0, Math.PI * 2);
-      ctx.stroke();
-      // (2) 中心の小さな white-mint glow（光点程度）
-      ctx.globalAlpha = alpha * 0.55;
-      const glow = ctx.createRadialGradient(px, py, 0, px, py, r * 0.6);
-      glow.addColorStop(0, COLOR_TRIM_GHOST_GLOW);
-      glow.addColorStop(1, 'rgba(168, 255, 240, 0)');
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(px, py, r * 0.6, 0, Math.PI * 2);
-      ctx.fill();
-      // (3) 短い diagonal slash（「削れた」記号、控えめに）
-      ctx.globalAlpha = alpha * 0.6;
-      ctx.strokeStyle = COLOR_TRIM_GHOST_RING;
-      ctx.lineWidth = 1;
-      const slashLen = r * 0.7;
-      ctx.beginPath();
-      ctx.moveTo(px - slashLen, py - slashLen);
-      ctx.lineTo(px + slashLen, py + slashLen);
-      ctx.stroke();
-      // (4) 微小 spark（時間経過で外側にじわっと拡散）
-      ctx.globalAlpha = alpha * 0.65;
-      ctx.fillStyle = COLOR_TRIM_GHOST_SPARK;
-      const sparkOffset = rBase * (0.4 + t * 0.5);
-      ctx.beginPath();
-      ctx.arc(px + sparkOffset * 0.6, py - sparkOffset * 0.6, 0.9, 0, Math.PI * 2);
-      ctx.fill();
+      const cx = g.x * SZ + SZ / 2;
+      const cy = g.y * SZ + SZ / 2;
+
+      // ── Phase 1: segment ghost（最初の 150ms だけ薄い角丸四角を残して軽く発光） ──
+      // v2.5.1: 初動の認知を担保するため alpha を 0.55 → 0.75 に強化
+      if (g.ageMs < TRIM_GHOST_SEGMENT_PHASE_MS) {
+        const segT = g.ageMs / TRIM_GHOST_SEGMENT_PHASE_MS;   // 0 → 1
+        const segAlpha = (1 - segT) * 0.75;
+        ctx.globalAlpha = segAlpha;
+        ctx.fillStyle = COLOR_TRIM_GHOST_SEGMENT;
+        roundRect(g.x * SZ + 1.5, g.y * SZ + 1.5, SZ - 3, SZ - 3, 5);
+        ctx.fill();
+      }
+
+      // ── Phase 2: ash particles（生成時固定の random 値で上方向へ drift） ──
+      const ageSec = g.ageMs / 1000;
+      for (let k = 0; k < g.particles.length; k++) {
+        const p = g.particles[k];
+        // 粒子個別の寿命（lifeRatioSeed で人ごとに少しずれて消える）
+        const pLife = t / p.lifeRatioSeed;
+        if (pLife >= 1) continue;
+        // 後半は少し外側へ散らす（横速度に t を掛けた追加 drift）
+        const driftX = p.velocityX * ageSec + (p.velocityX * 0.6) * t;
+        const driftY = p.velocityY * ageSec;   // 上方向（velocityY は負値）
+        const px = cx + p.offsetX + driftX;
+        const py = cy + p.offsetY + driftY;
+        // 後半急に薄くなる感を出すため fade を二乗
+        const fade = 1 - pLife;
+        ctx.globalAlpha = p.alphaSeed * fade * fade;
+        ctx.fillStyle = particleColors[p.colorIndex];
+        // size もわずかに縮ませる（crumbled 感）
+        const size = p.size * (0.85 + 0.15 * fade);
+        ctx.beginPath();
+        ctx.arc(px, py, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.restore();
   }
@@ -566,6 +611,7 @@
     trimGhosts          = [];
     comboCount          = 0;
     comboWindowMs       = 0;
+    rebirthChargeSteps  = 0;
     specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
     updateBuffBar();
   }
@@ -648,13 +694,20 @@
           }
         }
       }
-      // Phase 6-B / v2.5: Rebirth Spawn Bias / Combo Charge
-      // level up 判定の後で lvl を見ることで、Lv6 到達したその取得から combo=1 が立つ
+      // Phase 6-B / v2.5: Rebirth Spawn Bias / Combo Charge + v2.5.1: Rebirth Charge
+      // level up 判定の後で lvl を見ることで、Lv6 到達したその取得から combo=1 / charge=1 が立つ
+      // updateBuffBar() は両者の更新後に末尾で 1 回だけ呼び、無駄な再描画を抑える
+      let buffChanged = false;
       if (lvl >= COMBO_MIN_LV) {
         comboCount    = Math.min(comboCount + 1, COMBO_MAX);
         comboWindowMs = COMBO_WINDOW_MS;
-        updateBuffBar();   // combo >= 2 で COMBO chip が即時表示される
+        buffChanged = true;
       }
+      if (lvl >= REBIRTH_CHARGE_MIN_LV) {
+        rebirthChargeSteps = Math.min(rebirthChargeSteps + 1, REBIRTH_CHARGE_MAX_STEPS);
+        buffChanged = true;
+      }
+      if (buffChanged) updateBuffBar();
       placeFood();
     }
 
@@ -667,6 +720,11 @@
       updateHUD();
       Audio.eat();
       applySpecialFoodEffect(specialType);
+      // Phase 6-B / v2.5.1: Rebirth Core を実際に取得した時のみ Charge を reset
+      // Slow Core 取得 / TTL 切れ / spawn 失敗では Charge を維持（仕様通り）
+      if (specialType === 'rebirth') {
+        rebirthChargeSteps = 0;
+      }
       despawnSpecialFood();
     }
 
@@ -686,13 +744,32 @@
         const targetLen = Math.max(snake.length - REBIRTH_TRIM_COUNT, MIN_SNAKE_LENGTH);
         while (snake.length > targetLen) {
           const tail = snake[snake.length - 1];
-          trimGhosts.push({ x: tail.x, y: tail.y, ageMs: 0 });
+          trimGhosts.push(createTrimGhost(tail.x, tail.y));
           snake.pop();
         }
       } else {
         snake.pop();   // 通常の steady-state pop
       }
     }
+  }
+
+  // Phase 6-B / v2.5 UX: trim ghost 生成（粒子のランダム値は作成時に固定 / 毎フレーム再生成しない）
+  // v2.5.1: size / alphaSeed / velocityY を上方修正し、高速 Lv でも視認できる強度に
+  function createTrimGhost(x, y) {
+    const particles = [];
+    for (let i = 0; i < TRIM_GHOST_PARTICLE_COUNT; i++) {
+      particles.push({
+        offsetX:       (Math.random() - 0.5) * SZ * 0.6,      // segment 内のランダム初期位置
+        offsetY:       (Math.random() - 0.5) * SZ * 0.6,
+        velocityX:     (Math.random() - 0.5) * 14,            // 横方向ゆらぎ（px/秒）
+        velocityY:     -(10 + Math.random() * 20),            // 上方向 drift -10〜-30 px/秒（v2.5.1: 25% 増）
+        size:          1.0 + Math.random() * 1.6,             // 1.0〜2.6px（v2.5.1: 上限引き上げ）
+        lifeRatioSeed: 0.65 + Math.random() * 0.35,           // 粒子ごとの寿命比（0.65〜1.0）
+        alphaSeed:     0.65 + Math.random() * 0.35,           // 粒子ごとの最大 alpha 0.65〜1.0（v2.5.1: 底上げ）
+        colorIndex:    Math.floor(Math.random() * 3),         // 0=cyan / 1=white / 2=pale blue
+      });
+    }
+    return { x, y, ageMs: 0, particles };
   }
 
   /* ── v2: Level up ハイライト ── */
@@ -836,6 +913,7 @@
     trimGhosts          = [];
     comboCount          = 0;
     comboWindowMs       = 0;
+    rebirthChargeSteps  = 0;
     specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
     hasSpawnedLevel5IntroSlow = false;
     updateBuffBar();
