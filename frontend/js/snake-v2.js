@@ -83,12 +83,73 @@
   // 小数誤差を避けるため integer step 管理（0〜10）
   const REBIRTH_CHARGE_MIN_LV       = 6;       // Charge が有効になる最低レベル
   const REBIRTH_CHARGE_MAX_STEPS    = 10;      // Charge 上限（10 個取得で REBIRTH READY）
-  const REBIRTH_CHARGE_DISPLAY_MIN  = 5;       // CHARGE chip を表示し始める step（50% 相当）
+  const REBIRTH_CHARGE_DISPLAY_MIN  = 5;       // (v2.5.1) 旧 CHARGE chip 表示閾値 / v2.5.4 では未使用
+
+  // Phase 6-B / v2.5.4: Rebirth Charge Body UX（snake body amber/gold glow 表現）
+  // v2.5.4 polish2: 緑ベース維持 + 外側 halo / rim 強化 + wave は accent のみ
+  const COLOR_CHARGE_GLOW_AMBER     = '#ffd060';   // 通常 charge 帯 (ratio < 0.5) の amber
+  const COLOR_CHARGE_GLOW_GOLD      = '#ffe07a';   // 強い charge 帯 (ratio >= 0.5) の gold 寄り amber
+  const COLOR_CHARGE_AURA_GOLD      = '#fff2b0';   // READY 時の head aura / wave 中心の明るい gold
+
+  // 本体 overlay は控えめ（緑を残すため alpha を polish 値から大きめに下げる / v2.5.4 polish3 で更に微減）
+  const CHARGE_BODY_ALPHA_LOW       = 0.08;        // ratio < 0.5 の glow alpha
+  const CHARGE_BODY_ALPHA_HIGH      = 0.14;        // ratio >= 0.5 の glow alpha
+  const CHARGE_BODY_ALPHA_READY     = 0.22;        // READY 時の全身 glow alpha
+
+  // 外側 halo（発光のベース、controlled に少し抑える）
+  const CHARGE_HALO_ALPHA_LOW       = 0.22;        // ratio < 0.5
+  const CHARGE_HALO_ALPHA_HIGH      = 0.34;        // ratio >= 0.5
+  const CHARGE_HALO_ALPHA_READY     = 0.46;        // READY
+  const CHARGE_HALO_EXPAND_PX       = 3;
+
+  // Rim glow（segment 縁の細い stroke、controlled に少し抑える）
+  const CHARGE_RIM_ALPHA_LOW        = 0.32;
+  const CHARGE_RIM_ALPHA_HIGH       = 0.44;
+  const CHARGE_RIM_ALPHA_READY      = 0.58;
+  const CHARGE_RIM_LINE_WIDTH       = 1.2;
+
+  // Phase 6-B / v2.5.4 polish3: Electric Arc（短い lightning 線で「電流が流れる」体感）
+  const COLOR_ARC_CORE              = '#fffbe6';   // 白〜pale gold の芯線
+  const COLOR_ARC_GLOW              = '#ffe07a';   // gold の太い glow 線
+  const ARC_PERIOD_MS               = 700;         // arc 動き 1 周期（jagged 形状の seed リフレッシュ）
+  const ARC_FLOW_PERIOD_MS          = 1300;        // tail → head の流れ周期
+  const ARC_GLOW_LINE_WIDTH         = 3.0;         // 太い半透明 glow 線
+  const ARC_CORE_LINE_WIDTH         = 1.2;         // 細い芯線
+  const ARC_GLOW_ALPHA              = 0.45;        // glow 線の alpha
+  const ARC_CORE_ALPHA              = 0.85;        // 芯線の alpha
+  const ARC_JITTER_PX               = 3.5;         // jagged 中間点のずらし最大 px
+  const ARC_MIDPOINTS               = 2;           // 隣接 segment 間に置く中間点の個数
+  const ARC_DENSITY_LOW             = 0.45;        // ratio < 0.5 で arc 発生する比率
+  const ARC_DENSITY_HIGH            = 0.70;        // ratio >= 0.5
+  const ARC_DENSITY_READY           = 0.90;        // READY 時の発生比率
+  const ARC_FLOW_BAND_HALF          = 2.2;         // 流れバンドの半幅（segment 単位）
+
+  // Energy pulse wave は本体全体を黄色化せず、wave ピーク中だけ accent を強める方式に変更
+  const CHARGE_WAVE_AMP             = 0.30;        // overlay alpha 加算上限（控えめに）
+  const CHARGE_WAVE_HALO_AMP        = 0.25;        // halo alpha 加算上限
+  const CHARGE_WAVE_RIM_AMP         = 0.35;        // rim alpha 加算上限（光が縁を走る感）
+  const CHARGE_WAVE_WIDTH           = 2.0;         // wave の幅（segment 単位の半幅、少し絞る）
+  const CHARGE_WAVE_PERIOD_MS       = 1300;        // wave 1 周期の所要時間（tail → head）
+
+  // READY head aura
+  const CHARGE_READY_ALPHA_BASE     = 0.50;        // READY aura の基本 alpha（少し強化）
+  const CHARGE_READY_PULSE_AMP      = 0.25;        // pulse 振幅（reduced-motion 時は 0 固定）
+  const CHARGE_READY_PULSE_MS       = 1400;        // pulse 周期
+  const CHARGE_READY_AURA_RADIUS_PX = 7;           // READY aura の追加半径
 
   // Phase 6-A Dev Mode: ?dev=1 クエリで有効化
   const isDevMode = (() => {
     try {
       return new URLSearchParams(window.location.search).get('dev') === '1';
+    } catch (_) {
+      return false;
+    }
+  })();
+
+  // Phase 6-B / v2.5.4: prefers-reduced-motion 判定（READY aura の pulse 制御に使用）
+  const prefersReducedMotion = (() => {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     } catch (_) {
       return false;
     }
@@ -124,7 +185,8 @@
   const buffRebirthEl = document.getElementById('buff-rebirth');
   const buffPickupEl  = document.getElementById('buff-pickup');
   const buffComboEl   = document.getElementById('buff-combo');
-  const buffChargeEl  = document.getElementById('buff-charge');
+  // Phase 6-B / v2.5.4: 旧 #buff-charge chip を廃止し、READY 専用 #buff-rebirth-ready に置換
+  const buffReadyEl   = document.getElementById('buff-rebirth-ready');
 
   /* ── State ── */
   let snake, dir, nextDir, food;
@@ -525,18 +587,14 @@
         buffComboEl.hidden = true;
       }
     }
-    // Phase 6-B / v2.5.1: CHARGE chip（Lv6+ で steps>=5 のとき表示、上限到達で REBIRTH READY に切替）
-    if (buffChargeEl) {
-      if (lvl >= REBIRTH_CHARGE_MIN_LV && rebirthChargeSteps >= REBIRTH_CHARGE_DISPLAY_MIN) {
-        if (rebirthChargeSteps >= REBIRTH_CHARGE_MAX_STEPS) {
-          buffChargeEl.textContent = 'REBIRTH READY';
-        } else {
-          buffChargeEl.textContent = 'CHARGE ' + (rebirthChargeSteps * 10) + '%';
-        }
-        buffChargeEl.hidden = false;
+    // Phase 6-B / v2.5.4: REBIRTH READY chip（READY 時のみ表示 / Charge 進捗は snake body glow で表現）
+    if (buffReadyEl) {
+      if (lvl >= REBIRTH_CHARGE_MIN_LV && rebirthChargeSteps >= REBIRTH_CHARGE_MAX_STEPS) {
+        buffReadyEl.textContent = 'REBIRTH READY';
+        buffReadyEl.hidden = false;
       } else {
-        buffChargeEl.textContent = '';
-        buffChargeEl.hidden = true;
+        buffReadyEl.textContent = '';
+        buffReadyEl.hidden = true;
       }
     }
   }
@@ -867,14 +925,256 @@
     ctx.closePath();
   }
 
+  // Phase 6-B / v2.5.4 polish2: charged segment の外側に gold halo を敷く（本体の下層、発光の主役）
+  // wave ピーク中はさらに halo alpha を加算して「光が流れる」体感を halo 側に集約
+  function drawChargeBodyHalo(seg, chargeRatio, isReady, waveBoost) {
+    let alpha;
+    if (isReady)                alpha = CHARGE_HALO_ALPHA_READY;
+    else if (chargeRatio < 0.5) alpha = CHARGE_HALO_ALPHA_LOW;
+    else                        alpha = CHARGE_HALO_ALPHA_HIGH;
+    if (waveBoost > 0) alpha = Math.min(1, alpha + CHARGE_WAVE_HALO_AMP * waveBoost);
+    const expand = CHARGE_HALO_EXPAND_PX;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = (chargeRatio < 0.5 && !isReady && waveBoost < 0.5)
+      ? COLOR_CHARGE_GLOW_AMBER
+      : COLOR_CHARGE_GLOW_GOLD;
+    roundRect(
+      seg.x * SZ + 1.5 - expand,
+      seg.y * SZ + 1.5 - expand,
+      SZ - 3 + expand * 2,
+      SZ - 3 + expand * 2,
+      5 + expand
+    );
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Phase 6-B / v2.5.4: 本体 overlay は控えめにし、緑をしっかり残す（gold は accent として乗せる程度）
+  // wave ピーク中のみ alpha 加算で「ハイライトが流れる」体感を出す
+  function drawChargeBodyGlow(seg, chargeRatio, isReady, waveBoost) {
+    let alpha, color;
+    if (isReady) {
+      alpha = CHARGE_BODY_ALPHA_READY;
+      color = COLOR_CHARGE_GLOW_GOLD;
+    } else if (chargeRatio < 0.5) {
+      alpha = CHARGE_BODY_ALPHA_LOW;
+      color = COLOR_CHARGE_GLOW_AMBER;
+    } else {
+      alpha = CHARGE_BODY_ALPHA_HIGH;
+      color = COLOR_CHARGE_GLOW_GOLD;
+    }
+    if (waveBoost > 0) {
+      alpha = Math.min(1, alpha + CHARGE_WAVE_AMP * waveBoost);
+      if (waveBoost >= 0.7) color = COLOR_CHARGE_AURA_GOLD;
+    }
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    roundRect(seg.x * SZ + 1.5, seg.y * SZ + 1.5, SZ - 3, SZ - 3, 5);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Phase 6-B / v2.5.4 polish2: charged segment の縁に gold rim を描き「光が体の縁に走る」体感を出す
+  // 緑本体の色を活かしつつ、輪郭だけが gold に光る形（wave ピーク中は rim alpha を加算）
+  function drawChargeBodyRim(seg, chargeRatio, isReady, waveBoost) {
+    let alpha;
+    if (isReady)                alpha = CHARGE_RIM_ALPHA_READY;
+    else if (chargeRatio < 0.5) alpha = CHARGE_RIM_ALPHA_LOW;
+    else                        alpha = CHARGE_RIM_ALPHA_HIGH;
+    if (waveBoost > 0) alpha = Math.min(1, alpha + CHARGE_WAVE_RIM_AMP * waveBoost);
+    const color = (waveBoost >= 0.7)
+      ? COLOR_CHARGE_AURA_GOLD
+      : (chargeRatio < 0.5 && !isReady ? COLOR_CHARGE_GLOW_AMBER : COLOR_CHARGE_GLOW_GOLD);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = CHARGE_RIM_LINE_WIDTH;
+    roundRect(seg.x * SZ + 1.5, seg.y * SZ + 1.5, SZ - 3, SZ - 3, 5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Phase 6-B / v2.5.4 polish: charged 部分を tail → head 方向に流れる pulse wave の強度を返す
+  // 戻り値 0〜1 で、その segment が wave ピーク内かどうか + 中心からの距離による減衰
+  // prefersReducedMotion 時は常に 0（wave 停止）、静止 glow のみで表現
+  function getChargeWaveBoost(i, snakeLen, glowSegCount, chargeRatio) {
+    if (prefersReducedMotion || glowSegCount <= 0 || chargeRatio <= 0) return 0;
+    // wave 中心位置（segment index 空間で tail → head に進む）。
+    // glow 範囲: snake.length - glowSegCount 〜 snake.length - 1（i の値が大きいほど tail 側）
+    // 体感的には tail から head（i 大 → i 小）に流れさせたいので、t の逆方向で進行させる
+    const t = (Date.now() % CHARGE_WAVE_PERIOD_MS) / CHARGE_WAVE_PERIOD_MS;   // 0 → 1
+    const glowStartIdx = snakeLen - glowSegCount;                              // 一番 head 寄りの glow segment 位置
+    const glowEndIdx   = snakeLen - 1;                                         // tail
+    // tail (t=0) → head (t=1) で wave 中心が移動
+    const centerIdx = glowEndIdx - (glowEndIdx - glowStartIdx) * t;
+    const dist = Math.abs(i - centerIdx);
+    if (dist > CHARGE_WAVE_WIDTH) return 0;
+    // 中心ほど強い（cos 形状の減衰）
+    return 0.5 + 0.5 * Math.cos((dist / CHARGE_WAVE_WIDTH) * Math.PI);
+  }
+
+  // Phase 6-B / v2.5.4 polish3: charged segment 間に短い lightning / electric arc を描く
+  // 各 arc は隣接 segment の center を結ぶ折れ線で、中間点を sin + 擬似乱数で揺らす
+  // 描画専用：collision / snake.length / movement に影響しない
+  function drawChargeElectricArcs(chargeRatio, isReady, glowSegCount) {
+    if (prefersReducedMotion) return;                  // reduced-motion 時は arc 停止
+    if (!snake || snake.length < 2 || glowSegCount < 1) return;
+    if (chargeRatio <= 0) return;
+
+    const now = Date.now();
+    const arcSeedT = now / ARC_PERIOD_MS;             // jagged 形状の更新周期
+    const flowT = (now % ARC_FLOW_PERIOD_MS) / ARC_FLOW_PERIOD_MS;   // 0 → 1
+    const density = isReady ? ARC_DENSITY_READY
+                  : (chargeRatio < 0.5 ? ARC_DENSITY_LOW : ARC_DENSITY_HIGH);
+
+    // 流れバンドの中心位置（segment index 空間、tail → head 方向）
+    const glowStartIdx = snake.length - glowSegCount;
+    const glowEndIdx   = snake.length - 1;
+    const flowCenterIdx = glowEndIdx - (glowEndIdx - glowStartIdx) * flowT;
+
+    // charged 範囲の隣接ペアを走査（i は head 側 / i+1 は tail 側）
+    for (let i = glowStartIdx; i < glowEndIdx; i++) {
+      // 両端が glow 範囲内であることを確認（i+1 も glow 範囲）
+      const pairCenter = (i + (i + 1)) / 2;
+      const distToFlow = Math.abs(pairCenter - flowCenterIdx);
+      // 流れバンド外でも density に応じて稀に出すが、バンド内では強く出す
+      const inFlowBand = distToFlow <= ARC_FLOW_BAND_HALF;
+      // 擬似乱数（seed: pairCenter + 時刻スロット） — Math.random は使わずチラつかない
+      const seed = Math.sin((pairCenter + Math.floor(arcSeedT)) * 12.9898) * 43758.5453;
+      const r1 = seed - Math.floor(seed);   // 0〜1
+      const threshold = inFlowBand ? density : density * 0.25;
+      if (r1 > threshold) continue;
+
+      // 隣接 segment center 座標
+      const a = snake[i];
+      const b = snake[i + 1];
+      const ax = a.x * SZ + SZ / 2;
+      const ay = a.y * SZ + SZ / 2;
+      const bx = b.x * SZ + SZ / 2;
+      const by = b.y * SZ + SZ / 2;
+      // 線分に垂直なベクトル（中間点を垂直方向に揺らすため）
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+
+      // jagged 中間点を生成（各点を擬似乱数 + sin で垂直方向にずらす）
+      const points = [];
+      points.push({ x: ax, y: ay });
+      for (let m = 1; m <= ARC_MIDPOINTS; m++) {
+        const f = m / (ARC_MIDPOINTS + 1);
+        // pair / midpoint / 時刻スロットの組合せで seed を変える
+        const s = Math.sin((pairCenter * 7.13 + m * 5.71 + Math.floor(arcSeedT)) * 23.456) * 91.351;
+        const r = s - Math.floor(s);                  // 0〜1
+        const offset = (r - 0.5) * 2 * ARC_JITTER_PX; // -JITTER〜+JITTER
+        points.push({ x: ax + dx * f + nx * offset, y: ay + dy * f + ny * offset });
+      }
+      points.push({ x: bx, y: by });
+
+      // wave / flow band 内では alpha を強化、バンド外は控えめ
+      const bandBoost = inFlowBand ? 1.0 : 0.6;
+
+      // (1) 太い半透明 glow 線
+      ctx.save();
+      ctx.globalAlpha = ARC_GLOW_ALPHA * bandBoost;
+      ctx.strokeStyle = COLOR_ARC_GLOW;
+      ctx.lineWidth = ARC_GLOW_LINE_WIDTH;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let p = 1; p < points.length; p++) ctx.lineTo(points[p].x, points[p].y);
+      ctx.stroke();
+      ctx.restore();
+
+      // (2) 細い白〜pale gold の芯線
+      ctx.save();
+      ctx.globalAlpha = ARC_CORE_ALPHA * bandBoost;
+      ctx.strokeStyle = COLOR_ARC_CORE;
+      ctx.lineWidth = ARC_CORE_LINE_WIDTH;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let p = 1; p < points.length; p++) ctx.lineTo(points[p].x, points[p].y);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // Phase 6-B / v2.5.4: REBIRTH READY 時に head 周囲に gold aura を描く（v2.5.4 polish で半径・alpha 強化）
+  // prefers-reduced-motion 時は pulse を停止し固定 alpha で描画（aura 自体は常に表示）
+  function drawChargeReadyAura(head) {
+    let pulseAlpha;
+    if (prefersReducedMotion) {
+      pulseAlpha = CHARGE_READY_ALPHA_BASE;
+    } else {
+      const t = (Date.now() % CHARGE_READY_PULSE_MS) / CHARGE_READY_PULSE_MS;
+      pulseAlpha = CHARGE_READY_ALPHA_BASE + CHARGE_READY_PULSE_AMP * Math.sin(t * Math.PI * 2);
+    }
+    if (pulseAlpha <= 0) return;
+    const px = head.x * SZ + SZ / 2;
+    const py = head.y * SZ + SZ / 2;
+    const r  = SZ / 2 + CHARGE_READY_AURA_RADIUS_PX;   // polish で半径拡大
+    ctx.save();
+    ctx.globalAlpha = pulseAlpha;
+    const grad = ctx.createRadialGradient(px, py, 1, px, py, r + 6);
+    grad.addColorStop(0, COLOR_CHARGE_AURA_GOLD);
+    grad.addColorStop(0.55, 'rgba(255, 224, 122, 0.55)');
+    grad.addColorStop(1, 'rgba(255, 242, 176, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(px, py, r + 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   function draw() {
     drawGrid();
+
+    // Phase 6-B / v2.5.4: Rebirth Charge Body UX
+    // chargeRatio から glow 対象 segment 数を計算（短 snake でも最低 1 segment が光るよう補正）
+    const chargeRatio = (lvl >= REBIRTH_CHARGE_MIN_LV && snake)
+      ? rebirthChargeSteps / REBIRTH_CHARGE_MAX_STEPS
+      : 0;
+    const isReady = chargeRatio >= 1.0;
+    let glowSegCount = 0;
+    if (chargeRatio > 0 && snake) {
+      const rawGlowSegCount = Math.round(snake.length * chargeRatio);
+      glowSegCount = Math.max(1, Math.min(snake.length, rawGlowSegCount));
+    }
+    // READY 時の head aura は snake 本体の下に敷く（aura → halo → 本体 → glow + wave の順）
+    if (isReady && snake) drawChargeReadyAura(snake[0]);
+
+    // v2.5.4 polish2: charged segment の外側 halo を snake 本体より前に敷く（wave 反映）
+    if (glowSegCount > 0 && snake) {
+      for (let i = 0; i < snake.length; i++) {
+        const isGlow = (snake.length - 1 - i) < glowSegCount;
+        if (isGlow) {
+          const waveBoost = getChargeWaveBoost(i, snake.length, glowSegCount, chargeRatio);
+          drawChargeBodyHalo(snake[i], chargeRatio, isReady, waveBoost);
+        }
+      }
+    }
 
     snake.forEach((seg, i) => {
       const ci = Math.min(SNAKE_COLORS.length - 1, Math.floor(i / 3));
       ctx.fillStyle = SNAKE_COLORS[ci];
       roundRect(seg.x * SZ + 1.5, seg.y * SZ + 1.5, SZ - 3, SZ - 3, 5);
       ctx.fill();
+
+      // Phase 6-B / v2.5.4 polish2: tail → head 方向に流れる energy wave を accent として
+      //   - body overlay は控えめ（緑を残す）
+      //   - rim stroke で「光が縁を走る」感を強める
+      const isGlowSeg = glowSegCount > 0 && (snake.length - 1 - i) < glowSegCount;
+      if (isGlowSeg) {
+        const waveBoost = getChargeWaveBoost(i, snake.length, glowSegCount, chargeRatio);
+        drawChargeBodyGlow(seg, chargeRatio, isReady, waveBoost);
+        drawChargeBodyRim(seg, chargeRatio, isReady, waveBoost);
+      }
 
       if (i === 0) {
         const cx = seg.x * SZ + SZ / 2;
@@ -896,6 +1196,10 @@
         ctx.fill();
       }
     });
+
+    // Phase 6-B / v2.5.4 polish3: charged segment 間に短い electric arc を重ねる
+    // （snake 本体・eyes より上、food より下のレイヤー / reduced-motion 時は内部で early return）
+    if (glowSegCount > 0) drawChargeElectricArcs(chargeRatio, isReady, glowSegCount);
 
     const pulse = 0.85 + 0.15 * Math.sin(Date.now() / 250);
     const fx = food.x * SZ + SZ / 2;

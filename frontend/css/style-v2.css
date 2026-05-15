@@ -939,11 +939,11 @@ body {
   background: rgba(180, 120, 255, 0.16);
   border: 1px solid rgba(180, 120, 255, 0.5);
 }
-/* CHARGE: Rebirth Charge 進捗 / REBIRTH READY 状態（amber 系で他 chip と区別） */
-.buff-chip.is-charge {
+/* REBIRTH READY: Rebirth Charge MAX 時のみ表示（v2.5.4 で旧 CHARGE chip を置換 / gold-amber 系） */
+.buff-chip.is-ready {
   color: #ffe07a;
-  background: rgba(255, 200, 80, 0.16);
-  border: 1px solid rgba(255, 200, 80, 0.5);
+  background: rgba(255, 200, 80, 0.18);
+  border: 1px solid rgba(255, 200, 80, 0.6);
 }
 @media (max-width: 480px) {
   /* モバイルは 5 chip 折返し前提で 2 段分を予約（PC は 1 段のまま自然な間隔を維持） */

@@ -349,3 +349,57 @@ ECC hooks は `templates/.claude/settings.json` には入れない。
   - 対応: 「通常 pop 1 回(ghost なし) + Rebirth penalty 最大 3 回(ghost あり)」に分離し、ghost 個数を 3 個に修正
 - Lv6以降の Rebirth Core 出現率が低く感じたため、Combo Charge による Rebirth Spawn Bias を追加
 - これにより、高レベル帯で高得点を狙いやすい戦略性を追加
+
+### Phase 6-B / v2.5.4 Rebirth Charge Electric Body UX
+
+#### 変更ファイル
+
+- `frontend/index-v2.html`
+- `frontend/css/style-v2.css`
+- `frontend/js/snake-v2.js`
+
+#### 変更しなかったファイル
+
+- `frontend/js/audio-v2.js`
+- `frontend/js/api.js`
+- `backend/`
+- `infrastructure/`
+- Ranking API
+- Score登録API
+- DynamoDB / Redis設計
+- GitHub Actions
+- v2.1 rollback files
+- v2.3 rollback snapshot files
+
+#### 実装内容
+
+- 横型 Rebirth Charge Bar を採用せず、snake body 表現へ変更
+- `#buff-charge` を廃止し、READY時専用の `#buff-rebirth-ready` に整理
+- charged segment に amber/gold glow を追加(外側 halo + 縁 rim + 控えめ overlay の 3 層)
+- segment間に electric arc / lightning line を追加(太い gold glow 線 + 細い white-gold 芯線の 2 層)
+- arc 形状は `Math.sin()` ベースの擬似乱数 seed で生成し、フレームごとにチラつかない
+- tail側からhead側へ energy が流れる表現(flow band で arc 密度を変化)
+- READY時は全身 glow + head aura + `REBIRTH READY` chip で明示
+- prefers-reduced-motion 対応(electric arc / wave / aura pulse を停止、静止 glow / aura は維持)
+- Rebirth Chargeロジックは変更なし(`rebirthChargeSteps` 加算 / reset / READY 判定 / 確定 spawn / Slow Assist / Soft Anti-Stall Timer / Level Threshold すべて v2.5.1 以降の仕様を維持)
+- backend / API / Ranking 変更なし
+
+#### 実機確認結果
+
+- PC確認済み
+- iPhone 15 Pro / Safariで確認済み
+- 電流effectが小さい画面でも視認できる
+- iPhone 15 Proでは重く感じない
+- スワイプ操作の邪魔にならない
+- Buff Barが崩れていない
+- FEVER / PICKUP / REBIRTH READY chip 表示問題なし
+- 横型Charge Barが復活していない
+- Rebirth取得後のreset挙動に問題なし
+
+#### 発生した問題と対応
+
+- 初期実装では HUD 下に横型 Rebirth Charge Bar を追加したが、ゲーム盤内表現の方が没入感が高いため取りやめ、snake body 表現へ転換
+- 初期の body glow は「snake 全体が黄色く塗りつぶされた」印象が強かったため、本体 overlay alpha を控えめにし、外側 halo / 縁 rim / electric arc に発光要素を分散
+- 「色が変わるだけ」に見える問題に対し、隣接 segment 間に jagged な lightning line を 2 層で描画し、「電流が体表を走る」体感へ転換
+- snake本体の緑を残しつつ、gold halo / rim / arc を重ねる方向に調整し、Neon Arcade UI トーンとの整合を確認
+- スマホでの視認性と操作影響を確認し、問題なし
