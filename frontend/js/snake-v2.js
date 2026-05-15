@@ -44,7 +44,8 @@
   const REBIRTH_MIN_LV              = 6;
   const MIN_SNAKE_LENGTH            = 3;
   const REBIRTH_TRIM_COUNT          = 3;       // v2.4: Rebirth で snake を縮める segment 数（-1 → -3）
-  const REBIRTH_WEIGHT_LV6_PLUS     = 0.6;     // v2.4: Lv6+ で Rebirth が選ばれる確率（残り 0.4 は Slow）
+  // Phase 6-B / v2.5.3: REBIRTH_WEIGHT_LV6_PLUS / REBIRTH_WEIGHT_MAX は廃止し、
+  // getRebirthWeightRange(lvl) で Lv 別の base/max を返す方式に移行（Slow Assist）
   const REBIRTH_FLASH_MS            = 1000;
   const COLOR_SLOW                  = '#ff9b3d';
   const COLOR_REBIRTH               = '#7fffaf';
@@ -69,8 +70,14 @@
   const COMBO_WINDOW_MS             = 3000;    // Normal Core 連続取得の許容間隔（3 秒）
   const COMBO_MAX                   = 5;       // combo 内部上限
   const COMBO_BIAS_STEP             = 0.05;    // combo 1 ごとの Rebirth bias 加算（+5%）
-  const REBIRTH_WEIGHT_MAX          = 0.85;    // Rebirth 比率上限（Slow を最低 15% 残す）
   const COMBO_DISPLAY_MIN           = 2;       // COMBO chip を表示する閾値
+
+  // Phase 6-B / v2.5.3: Soft Anti-Stall Timer
+  // 最後に Normal Core を取得してからの経過時間で specialFood spawn timer の進行倍率を変える
+  // 待機戦略を緩やかに抑制する（timer は reset せず進行速度のみ調整）
+  const STALL_PHASE1_END_MS         = 5000;    // 0〜5 秒: 通常速度（100%）
+  const STALL_PHASE2_END_MS         = 10000;   // 5〜10 秒: 25% 速度
+  const STALL_PHASE2_MULT           = 0.25;    // phase2 の進行倍率（phase3 は 0 で完全停止）
 
   // Phase 6-B / v2.5.1: Rebirth Charge / Guarantee System（Lv6+ 限定）
   // 小数誤差を避けるため integer step 管理（0〜10）
@@ -136,6 +143,7 @@
   let comboCount          = 0;     // Phase 6-B / v2.5: Normal Core 連続取得 combo（0〜COMBO_MAX）
   let comboWindowMs       = 0;     // combo 維持の残時間（frame-delta 管理）
   let rebirthChargeSteps  = 0;     // Phase 6-B / v2.5.1: Rebirth Charge 累積（integer 0〜REBIRTH_CHARGE_MAX_STEPS）
+  let stallMs             = 0;     // Phase 6-B / v2.5.3: 最後の Normal Core 取得からの経過時間（Soft Anti-Stall Timer）
   let lastFrameTs         = 0;     // updateSpecialTimers 用 per-frame delta tracker
   let hasSpawnedLevel5IntroSlow = false;   // Lv5 到達時の 1 回限り force spawn フラグ
 
@@ -219,6 +227,7 @@
     comboCount          = 0;
     comboWindowMs       = 0;
     rebirthChargeSteps  = 0;
+    stallMs             = 0;
     lastFrameTs         = 0;
     hasSpawnedLevel5IntroSlow = false;
     updateBuffBar();
@@ -275,6 +284,15 @@
     return lvl >= REBIRTH_CHARGE_MIN_LV && rebirthChargeSteps >= REBIRTH_CHARGE_MAX_STEPS;
   }
 
+  // Phase 6-B / v2.5.3: Lv 別の Rebirth weight range（base / max）を返す（Slow Assist）
+  // 操作難度が上がる高 Lv ほど Slow Core を出やすくして救済する。
+  // READY 中は呼ばれない（呼び出し側で isRebirthReady() を優先判定するため）。
+  function getRebirthWeightRange(lvl) {
+    if (lvl >= 10) return { base: 0.45, max: 0.70 };   // Lv10: Slow 最低 30%（combo MAX 時）
+    if (lvl >= 8)  return { base: 0.50, max: 0.75 };   // Lv8-9: Slow 最低 25%
+    return { base: 0.55, max: 0.80 };                  // Lv6-7: Slow 最低 20%
+  }
+
   // Phase 6-B / v2.5.2: score 更新後に呼んで、必要なら 1 段 level up する共通関数
   // Normal Core / Slow Core / Rebirth Core のどの取得経路からも呼べるよう切り出し済み
   // 現在の最大加点は Fever +2 までなので 1 段ずつの if 判定で十分（飛び級は起きない）。
@@ -325,19 +343,18 @@
       specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_RETRY_MS;
       return;
     }
-    // v2.4: Lv6+ で candidates が ['slow', 'rebirth'] の場合は重み付き抽選（rebirth 60% / slow 40%）
-    // Phase 6-B / v2.5: combo に応じて Rebirth bias を min(0.6 + combo*0.05, 0.85) まで上げる
+    // v2.4: Lv6+ で candidates が ['slow', 'rebirth'] の場合は重み付き抽選
+    // Phase 6-B / v2.5: combo に応じて Rebirth bias を上げる
     // Phase 6-B / v2.5.1: REBIRTH READY 中は Combo bias を skip して Rebirth を確定
+    // Phase 6-B / v2.5.3: Lv 別の base/max を getRebirthWeightRange() から取得し、高 Lv ほど Slow を出やすくする
     let type;
     if (candidates.length === 1) {
       type = candidates[0];
     } else if (isRebirthReady() && candidates.indexOf('rebirth') !== -1) {
       type = 'rebirth';
     } else {
-      const weight = Math.min(
-        REBIRTH_WEIGHT_LV6_PLUS + comboCount * COMBO_BIAS_STEP,
-        REBIRTH_WEIGHT_MAX
-      );
+      const range = getRebirthWeightRange(lvl);
+      const weight = Math.min(range.base + comboCount * COMBO_BIAS_STEP, range.max);
       type = Math.random() < weight ? 'rebirth' : 'slow';
     }
     specialFood = { x: cell.x, y: cell.y, type, ttlMs: SPECIAL_FOOD_TTL_MS };
@@ -382,6 +399,15 @@
   }
 
   function updateSpecialTimers(deltaMs) {
+    // Phase 6-B / v2.5.3: Soft Anti-Stall Timer 用に最後の Normal Core 取得からの経過時間を進める
+    // （pause / resume / タブ復帰は既存 FRAME_DELTA_MAX_MS clamp と lastFrameTs リセットで暴走防止）
+    stallMs += deltaMs;
+    // stallMs に応じた spawn timer の進行倍率を決定（specialFood TTL は通常速度を維持）
+    let stallMult;
+    if (stallMs < STALL_PHASE1_END_MS)      stallMult = 1.0;
+    else if (stallMs < STALL_PHASE2_END_MS) stallMult = STALL_PHASE2_MULT;
+    else                                     stallMult = 0;
+
     // specialFood TTL
     if (specialFood) {
       specialFood.ttlMs -= deltaMs;
@@ -391,8 +417,8 @@
         updateBuffBar();   // PICKUP 残秒数表示更新
       }
     } else if (lvl >= SLOW_MIN_LV) {
-      // 抽選 timer
-      specialSpawnDelayMs -= deltaMs;
+      // 抽選 timer（Soft Anti-Stall Timer の倍率を適用、stallMs >= 10秒で完全停止）
+      specialSpawnDelayMs -= deltaMs * stallMult;
       if (specialSpawnDelayMs <= 0) {
         // Phase 6-B / v2.5.1: REBIRTH READY 中は spawn probability を bypass し、確定で spawn 発火
         // type selection 側で Rebirth が確定的に選ばれる
@@ -644,6 +670,7 @@
     comboCount          = 0;
     comboWindowMs       = 0;
     rebirthChargeSteps  = 0;
+    stallMs             = 0;
     specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
     updateBuffBar();
   }
@@ -701,6 +728,8 @@
     let normalAte = false;
     if (head.x === food.x && head.y === food.y) {
       normalAte = true;
+      // Phase 6-B / v2.5.3: Soft Anti-Stall Timer — Normal Core 取得で stall を解除
+      stallMs = 0;
       // Phase 6-B / v2.5: Fever 中は Normal Core のみ +2、それ以外は +1
       const inc = feverMs > 0 ? FEVER_NORMAL_SCORE : 1;
       score += inc;
@@ -933,6 +962,7 @@
     comboCount          = 0;
     comboWindowMs       = 0;
     rebirthChargeSteps  = 0;
+    stallMs             = 0;
     specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
     hasSpawnedLevel5IntroSlow = false;
     updateBuffBar();
