@@ -18,3 +18,4 @@ backup/
 response.json
 
 .claude/skills/
+.claude/settings.local.json

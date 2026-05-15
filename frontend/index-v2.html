@@ -42,8 +42,14 @@
         </div>
       </div>
 
-      <!-- Phase 6-A: Special Food 状態表示 chip -->
-      <div id="special-status" class="special-chip" aria-live="polite" hidden></div>
+      <!-- Phase 6-B / v2.5: Active Buff Bar（固定高さで layout shift 防止 / chip は独立表示） -->
+      <div id="buff-bar" aria-live="polite">
+        <span id="buff-fever"   class="buff-chip is-fever"   hidden></span>
+        <span id="buff-slow"    class="buff-chip is-slow"    hidden></span>
+        <span id="buff-rebirth" class="buff-chip is-rebirth" hidden></span>
+        <span id="buff-pickup"  class="buff-chip is-pickup"  hidden></span>
+        <span id="buff-combo"   class="buff-chip is-combo"   hidden></span>
+      </div>
 
       <!-- キャンバス -->
       <div id="game-wrap">

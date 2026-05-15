@@ -17,6 +17,7 @@
 - CloudWatch Logs Interface VPC Endpoint を削除し、VPC 固定費を最適化
 - GitHub Actions + AWS SAM による CI/CD を構築
 - Neon Arcade UI、名前バリデーション、Web Audio API による BGM / 効果音を実装
+- Special Food System を拡張し、Rebirth Fever Mode / Buff Bar / Combo Charge によるスキル報酬型ゲーム性を追加
 
 ---
 
@@ -29,7 +30,8 @@
 | v2.1 | DynamoDB GSI 追加(scan → query 移行)、ElastiCache Redis 導入 | リリース済み |
 | v2.2 | UI 改修 + BGM / 効果音追加(ui-audio-v2) | リリース済み |
 | v2.3 | Neon Arcade UI 改修、Player Name validation 強化、BGM Level連動 BPM + Micro Ramp 追加 | リリース済み |
-| **v2.4** | **Phase 6-A: Special Food System 追加(Slow Core / Rebirth Core / Dev Mode)** | **実装・実機確認済み** |
+| v2.4 | Phase 6-A: Special Food System 追加(Slow Core / Rebirth Core / Dev Mode) | リリース済み |
+| **v2.5** | **Phase 6-B: Rebirth Fever Mode / Buff Bar UX / Combo Charge** | **実装・PC/スマホ確認済み** |
 
 ### v2.2 ハイライト
 
@@ -107,6 +109,63 @@
 
 > v2.3 rollback snapshot を S3 上に共存させているため、CloudFront の Default Root Object を `index-v2.3.html` に切り替えるだけで v2.4 → v2.3 へ即時 rollback 可能。
 
+### v2.5 ハイライト (Phase 6-B: Rebirth Fever Mode / Buff Bar UX / Combo Charge)
+
+v2.4 で導入した Special Food System を拡張し、リスク・リターンを伴うスキル報酬型ゲーム性を強化。
+backend / infrastructure / API は変更なし、フロントエンドのみで以下を追加実装しています。
+
+#### Rebirth Fever Mode
+
+- Rebirth Core 取得時に Fever Mode を 6 秒間付与
+- Fever 中に Normal Core を取得した場合のみ score +2（Slow Core / Rebirth Core 自体は倍率対象外）
+- Rebirth Core 再取得時は Fever 時間を加算せず 6 秒にリセット
+- Slow と Fever は独立タイマーで同時存在可能
+- score +2 加算で 5 点境界を跨いだ場合の level up にも対応（4 → 6 で Lv up 発火）
+- pause / resume / tab 復帰時の timer 暴走防止は既存 frame-delta clamp に乗せて実装
+
+#### Buff Bar UX
+
+- 旧 special-status chip(単一表示・優先順位切替)を廃止
+- HUD と canvas の間に Buff Bar を新設し、FEVER / SLOW / REBIRTH / PICKUP / COMBO を独立 chip として並列表示
+- PICKUP chip は active buff と区別するため `PICKUP: SLOW Ns` / `PICKUP: REBIRTH Ns` のように prefix 付き表示
+- Buff Bar は固定 min-height で予約領域を確保し、chip の表示・非表示で canvas 位置が動かない(layout shift ゼロ)
+- モバイル幅では 5 chip 折返しを 2 段分の min-height で事前予約
+
+#### Rebirth Tail Highlight
+
+- Rebirth Core 取得時、削除された tail segment を trim ghost として描画(0.5 秒で fade out + scale down)
+- 実際の snake.length は -3、trim ghost は描画専用で collision / snake 本体ロジックには影響しない
+- Neon Dissolve 風の控えめな演出(細い mint ring + 内側 white-mint glow + 短い diagonal slash + 微小 spark)で snake 本体や food と誤認しない
+
+#### Rebirth Spawn Bias / Combo Charge
+
+- Lv6 以上で有効
+- Normal Core を 3 秒以内に連続取得すると comboCount が上昇(内部上限 5)
+- 次回 specialFood 抽選時の Rebirth Core 出現率を combo に応じて加算: `min(0.6 + comboCount × 0.05, 0.85)`
+- Slow Core は最低 15% を維持
+- combo ≥ 2 のときだけ COMBO chip を Buff Bar に紫系で表示
+- specialFood 取得時 / TTL 切れ / gameOver / retry / Dev Mode の Clear Special で combo reset
+- spawn 抽選失敗のみでは combo は維持
+- specialFood の spawn delay / retry delay / TTL / spawn probability は変更せず、Lv6+ の type selection のみへの bias
+
+#### v2.5 で変更したファイル
+
+- `frontend/index-v2.html`(Buff Bar DOM 追加 / 旧 special-status 削除)
+- `frontend/css/style-v2.css`(Buff Bar レイアウト / 5 種 chip variant / モバイル 2 段予約)
+- `frontend/js/snake-v2.js`(Fever Mode / Combo Charge / Tail Highlight / Buff Bar 表示ロジック)
+
+#### v2.5 で変更しなかったもの
+
+- `frontend/js/audio-v2.js`(BGM / 効果音モジュール)
+- `frontend/js/api.js`(API クライアント)
+- `backend/`(Lambda / API 仕様)
+- `infrastructure/`(SAM テンプレート)
+- Ranking API / Score 登録 API
+- DynamoDB スキーマ / ElastiCache Redis 設定
+- GitHub Actions ワークフロー
+- v2.1 rollback files: `frontend/index.html`, `css/style.css`, `js/snake.js`
+- v2.3 rollback snapshot files: `frontend/index-v2.3.html`, `css/style-v2.3.css`, `js/snake-v2.3.js`, `js/audio-v2.3.js`
+
 詳細な作業ログ・Phase 単位の検証結果は [docs/ecc-selected-skills.md](docs/ecc-selected-skills.md) を参照。
 
 ---
@@ -175,16 +234,16 @@ snake_game_demo_dynamoDB/
 │
 ├── frontend/                        # プレゼンテーション層 (S3 + CloudFront)
 │   ├── index.html                   # v2.1 メインページ(rollback 用に保持)
-│   ├── index-v2.html                # v2.2〜v2.4 メインページ(現 Default Root Object)
+│   ├── index-v2.html                # v2.2〜v2.5 メインページ(現 Default Root Object)
 │   ├── index-v2.3.html              # v2.3 rollback snapshot
 │   ├── css/
 │   │   ├── style.css                # v2.1 スタイル(rollback 用に保持)
-│   │   ├── style-v2.css             # v2.2〜v2.4 スタイル
+│   │   ├── style-v2.css             # v2.2〜v2.5 スタイル
 │   │   └── style-v2.3.css           # v2.3 rollback snapshot
 │   └── js/
 │       ├── api.js                   # API Gateway クライアント(共通)
 │       ├── snake.js                 # v2.1 ゲームロジック(rollback 用に保持)
-│       ├── snake-v2.js              # v2.2〜v2.4 ゲームロジック (Special Food / Dev Mode)
+│       ├── snake-v2.js              # v2.2〜v2.5 ゲームロジック (Special Food / Fever / Buff Bar / Combo Charge / Dev Mode)
 │       ├── snake-v2.3.js            # v2.3 rollback snapshot
 │       ├── audio-v2.js              # Web Audio API 音源モジュール (BGM Micro Ramp 対応)
 │       └── audio-v2.3.js            # v2.3 rollback snapshot
@@ -389,19 +448,42 @@ main ──── 本番デプロイ対象(GitHub Actions が自動デプロイ)
 
 > v2.3 から Level 連動で BGM の BPM が段階的に上昇(Micro Ramp で滑らかに加速、Lv 8 以降は 164 BPM 上限)。
 
-### Special Food System(v2.4)
+### Special Food System(v2.5)
 
-| Core | 出現条件 | 効果 |
+Lv5 以降、通常餌に加えて特殊な効果を持つ Core が出現します。
+高レベル帯では、スピード調整・スコア加速・ヘビの長さ調整を使い分けながら、より高いスコアを狙えるようになります。
+
+| Core | 出現条件 | プレイヤーへの効果 |
 |---|---|---|
-| Normal Core | Lv1〜常時 | score +1、snake.length +1 |
-| Slow Core | Lv5〜 / Lv5到達時に初回確定出現 | score +1、snake.length +1、5秒間 speed × 1.35 |
-| Rebirth Core | Lv6〜 | score +1、snake.length -3、最低長さ3未満にはしない |
+| Normal Core | Lv1〜常時 | 通常の餌。取得するとスコアが増え、ヘビが伸びる |
+| Slow Core | Lv5〜 | 一定時間ゲームスピードが遅くなり、高速レベル帯でも立て直しやすくなる |
+| Rebirth Core | Lv6〜 | ヘビの長さを短くしつつ、短時間の Fever Mode を開始する |
 
-- Special Food は最大1個まで出現
-- TTL 7秒で自動消滅
-- 通常餌 / snake / specialFood の重なりを回避
-- pause / resume / retry / game over 時に状態を安全にリセット
-- Dev Mode は `?dev=1` の時だけ有効化し、score submit は無効化
+特殊 Core は同時に最大 1 個まで出現し、一定時間取得されないと自動的に消えます。Slow Core は Lv5 到達時に最初の 1 回だけ確定で出現するため、初見でも特殊 Core の存在を体験できます。
+
+#### Fever Mode
+
+Rebirth Core を取得すると Fever Mode が短時間発動します。
+Fever 中は Normal Core を取得したときのスコア獲得量が上がるため、リスクを取って Rebirth Core を取った直後ほど一気にスコアを伸ばせます。
+Fever 中に Rebirth Core を取り直すと、Fever 時間が再スタートし、攻めのチャンスを継続できます。
+
+#### Buff Bar
+
+HUD と盤面の間に Buff Bar を配置し、現在受けている効果やフィールド上の特殊 Core を独立した chip として表示します。
+FEVER / SLOW / REBIRTH / PICKUP / COMBO の各 chip が並列に表示され、複数の効果が同時に発動していても一目で状態を把握できます。
+PICKUP chip はフィールド上に出現中の特殊 Core を示し、すでに発動中の効果と混同しないよう区別されています。
+
+#### Rebirth Tail Highlight
+
+Rebirth Core を取得して短くなった尻尾部分が、画面上にネオン演出として一瞬残ります。
+ヘビ本体や食べ物と誤認しない控えめな表現で、「どこまで縮んだか」を視覚的に把握できるようにしています。
+あくまで演出のみで、当たり判定やゲームロジックには影響しません。
+
+#### Combo Charge
+
+Lv6 以降、Normal Core を短時間で連続取得すると Combo が上昇し、次に出現する特殊 Core が Rebirth Core になりやすくなります。
+ハイレベル帯で攻めたプレイをするほど Rebirth → Fever Mode へつなげやすくなり、高スコアを狙えるご褒美設計になっています。
+Combo は特殊 Core を取得するかタイミングを逃すとリセットされるため、適度な緊張感を保ったまま継続的に攻め続ける戦略が活きます。
 
 ---
 

@@ -44,6 +44,24 @@
   const COLOR_REBIRTH               = '#7fffaf';
   const FRAME_DELTA_MAX_MS          = 200;   // resume 直後の delta 暴走 guard
 
+  // Phase 6-B / v2.5: Rebirth Fever Mode
+  const FEVER_DURATION_MS           = 6000;  // Fever 継続時間（6 秒）
+  const FEVER_NORMAL_SCORE          = 2;     // Fever 中の Normal Core score 加算量（通常 +1 → Fever +2）
+
+  // Phase 6-B / v2.5 UX: Rebirth Tail Highlight（trim ghost / Neon Dissolve 演出）
+  const TRIM_GHOST_DURATION_MS      = 500;             // fade 継続時間（0.5 秒）
+  const COLOR_TRIM_GHOST_RING       = '#7fffd8';       // mint/cyan 系の細い ring
+  const COLOR_TRIM_GHOST_GLOW       = '#a8fff0';       // 内側 white-mint glow
+  const COLOR_TRIM_GHOST_SPARK      = '#ffffff';       // 補助の小 spark
+
+  // Phase 6-B / v2.5: Rebirth Spawn Bias / Combo Charge（Lv6+ 限定）
+  const COMBO_MIN_LV                = 6;       // combo が有効になる最低レベル
+  const COMBO_WINDOW_MS             = 3000;    // Normal Core 連続取得の許容間隔（3 秒）
+  const COMBO_MAX                   = 5;       // combo 内部上限
+  const COMBO_BIAS_STEP             = 0.05;    // combo 1 ごとの Rebirth bias 加算（+5%）
+  const REBIRTH_WEIGHT_MAX          = 0.85;    // Rebirth 比率上限（Slow を最低 15% 残す）
+  const COMBO_DISPLAY_MIN           = 2;       // COMBO chip を表示する閾値
+
   // Phase 6-A Dev Mode: ?dev=1 クエリで有効化
   const isDevMode = (() => {
     try {
@@ -77,8 +95,12 @@
   const rankingEmpty  = document.getElementById('ranking-empty');
   const rankingStatus = document.getElementById('ranking-status');
 
-  // Phase 6-A: Special Food UI
-  const specialStatusEl = document.getElementById('special-status');
+  // Phase 6-B / v2.5: Buff Bar（active buff chip 3個 + pickup hint chip 1個）
+  const buffFeverEl   = document.getElementById('buff-fever');
+  const buffSlowEl    = document.getElementById('buff-slow');
+  const buffRebirthEl = document.getElementById('buff-rebirth');
+  const buffPickupEl  = document.getElementById('buff-pickup');
+  const buffComboEl   = document.getElementById('buff-combo');
 
   /* ── State ── */
   let snake, dir, nextDir, food;
@@ -92,6 +114,10 @@
   let specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
   let slowEffectMs        = 0;
   let rebirthFlashMs      = 0;
+  let feverMs             = 0;     // Phase 6-B / v2.5: Fever 残時間（slowEffectMs と独立管理）
+  let trimGhosts          = [];    // Phase 6-B / v2.5 UX: Rebirth tail ghost { x, y, ageMs }[]（描画専用）
+  let comboCount          = 0;     // Phase 6-B / v2.5: Normal Core 連続取得 combo（0〜COMBO_MAX）
+  let comboWindowMs       = 0;     // combo 維持の残時間（frame-delta 管理）
   let lastFrameTs         = 0;     // updateSpecialTimers 用 per-frame delta tracker
   let hasSpawnedLevel5IntroSlow = false;   // Lv5 到達時の 1 回限り force spawn フラグ
 
@@ -170,9 +196,13 @@
     specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
     slowEffectMs        = 0;
     rebirthFlashMs      = 0;
+    feverMs             = 0;
+    trimGhosts          = [];
+    comboCount          = 0;
+    comboWindowMs       = 0;
     lastFrameTs         = 0;
     hasSpawnedLevel5IntroSlow = false;
-    updateSpecialStatus();
+    updateBuffBar();
     placeFood();
     updateHUD();
     levelEl.textContent = '1';
@@ -248,14 +278,19 @@
       return;
     }
     // v2.4: Lv6+ で candidates が ['slow', 'rebirth'] の場合は重み付き抽選（rebirth 60% / slow 40%）
+    // Phase 6-B / v2.5: combo に応じて Rebirth bias を min(0.6 + combo*0.05, 0.85) まで上げる
     let type;
     if (candidates.length === 1) {
       type = candidates[0];
     } else {
-      type = Math.random() < REBIRTH_WEIGHT_LV6_PLUS ? 'rebirth' : 'slow';
+      const weight = Math.min(
+        REBIRTH_WEIGHT_LV6_PLUS + comboCount * COMBO_BIAS_STEP,
+        REBIRTH_WEIGHT_MAX
+      );
+      type = Math.random() < weight ? 'rebirth' : 'slow';
     }
     specialFood = { x: cell.x, y: cell.y, type, ttlMs: SPECIAL_FOOD_TTL_MS };
-    updateSpecialStatus();
+    updateBuffBar();
   }
 
   // Phase 6-A: 確率抽選をバイパスして特定 type を強制 spawn（Lv5 intro / dev mode で使用）
@@ -263,14 +298,17 @@
     const cell = findEmptyCell();
     if (!cell) return false;
     specialFood = { x: cell.x, y: cell.y, type, ttlMs: SPECIAL_FOOD_TTL_MS };
-    updateSpecialStatus();
+    updateBuffBar();
     return true;
   }
 
   function despawnSpecialFood() {
     specialFood = null;
     specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
-    updateSpecialStatus();
+    // Phase 6-B / v2.5: 取得・TTL 切れの両方を通る一元 reset 点（spawn 抽選失敗ではここを通らない）
+    comboCount    = 0;
+    comboWindowMs = 0;
+    updateBuffBar();
   }
 
   // dispatch（将来 Phase 拡張時の hook ポイント）
@@ -286,8 +324,10 @@
 
   function applyRebirthEffect() {
     // snake.length 操作は update() 内で行う（pre-length guard を一元管理）
-    // ここでは chip flash トリガーのみ
+    // ここでは chip flash トリガー + Fever 開始
     rebirthFlashMs = REBIRTH_FLASH_MS;
+    // Phase 6-B / v2.5: Rebirth 取得で Fever 開始。重複取得時は加算せず常にリセット（6 秒に戻す）
+    feverMs = FEVER_DURATION_MS;
   }
 
   function updateSpecialTimers(deltaMs) {
@@ -297,7 +337,7 @@
       if (specialFood.ttlMs <= 0) {
         despawnSpecialFood();
       } else {
-        updateSpecialStatus();   // 残秒数表示更新
+        updateBuffBar();   // PICKUP 残秒数表示更新
       }
     } else if (lvl >= SLOW_MIN_LV) {
       // 抽選 timer
@@ -315,46 +355,147 @@
     if (slowEffectMs > 0) {
       slowEffectMs -= deltaMs;
       if (slowEffectMs <= 0) slowEffectMs = 0;
-      updateSpecialStatus();
+      updateBuffBar();
     }
     // REBIRTH chip flash 残時間
     if (rebirthFlashMs > 0) {
       rebirthFlashMs -= deltaMs;
       if (rebirthFlashMs <= 0) {
         rebirthFlashMs = 0;
-        updateSpecialStatus();
+        updateBuffBar();
+      }
+    }
+    // Phase 6-B / v2.5: Fever 残時間（Slow と独立管理 / speed には影響しない）
+    if (feverMs > 0) {
+      feverMs -= deltaMs;
+      if (feverMs <= 0) feverMs = 0;
+      updateBuffBar();
+    }
+    // Phase 6-B / v2.5 UX: trim ghost の age 更新（既存 frame-delta システムに乗せる）
+    if (trimGhosts.length > 0) {
+      for (let i = 0; i < trimGhosts.length; i++) {
+        trimGhosts[i].ageMs += deltaMs;
+      }
+      // 期限切れ ghost を除去
+      trimGhosts = trimGhosts.filter(g => g.ageMs < TRIM_GHOST_DURATION_MS);
+    }
+    // Phase 6-B / v2.5: combo timer（3 秒以内に Normal Core 再取得しないと reset）
+    if (comboWindowMs > 0) {
+      comboWindowMs -= deltaMs;
+      if (comboWindowMs <= 0) {
+        comboWindowMs = 0;
+        comboCount    = 0;
+      }
+      updateBuffBar();
+    }
+  }
+
+  // Phase 6-B / v2.5 UX: 各 buff chip を独立に表示・非表示する（優先順位切替ではなく並列表示）
+  function updateBuffBar() {
+    // FEVER chip
+    if (buffFeverEl) {
+      if (feverMs > 0) {
+        buffFeverEl.textContent = 'FEVER x' + FEVER_NORMAL_SCORE + ' ' + Math.ceil(feverMs / 1000) + 's';
+        buffFeverEl.hidden = false;
+      } else {
+        buffFeverEl.textContent = '';
+        buffFeverEl.hidden = true;
+      }
+    }
+    // SLOW chip（active な speed × 1.35 効果中）
+    if (buffSlowEl) {
+      if (slowEffectMs > 0) {
+        buffSlowEl.textContent = 'SLOW ' + Math.ceil(slowEffectMs / 1000) + 's';
+        buffSlowEl.hidden = false;
+      } else {
+        buffSlowEl.textContent = '';
+        buffSlowEl.hidden = true;
+      }
+    }
+    // REBIRTH chip（取得直後 1 秒の length 減少フラッシュ）
+    if (buffRebirthEl) {
+      if (rebirthFlashMs > 0) {
+        buffRebirthEl.textContent = 'REBIRTH -' + REBIRTH_TRIM_COUNT;
+        buffRebirthEl.hidden = false;
+      } else {
+        buffRebirthEl.textContent = '';
+        buffRebirthEl.hidden = true;
+      }
+    }
+    // PICKUP chip（フィールド上に specialFood がある TTL hint、active buff と明確に区別）
+    if (buffPickupEl) {
+      if (specialFood) {
+        const label = specialFood.type === 'slow' ? 'SLOW' : 'REBIRTH';
+        buffPickupEl.textContent = 'PICKUP: ' + label + ' ' + Math.ceil(specialFood.ttlMs / 1000) + 's';
+        buffPickupEl.hidden = false;
+      } else {
+        buffPickupEl.textContent = '';
+        buffPickupEl.hidden = true;
+      }
+    }
+    // COMBO chip（combo >= 2 のときだけ表示、Rebirth bias の可視化）
+    if (buffComboEl) {
+      if (comboCount >= COMBO_DISPLAY_MIN && comboWindowMs > 0) {
+        buffComboEl.textContent = 'COMBO x' + comboCount + ' ' + Math.ceil(comboWindowMs / 1000) + 's';
+        buffComboEl.hidden = false;
+      } else {
+        buffComboEl.textContent = '';
+        buffComboEl.hidden = true;
       }
     }
   }
 
-  function updateSpecialStatus() {
-    if (!specialStatusEl) return;
-    // 表示優先順位: REBIRTH flash > Slow effect > specialFood ttl > none
-    if (rebirthFlashMs > 0) {
-      specialStatusEl.textContent = 'REBIRTH -' + REBIRTH_TRIM_COUNT;
-      specialStatusEl.className = 'special-chip is-rebirth';
-      specialStatusEl.hidden = false;
-      return;
+  // Phase 6-B / v2.5 UX: Rebirth で削除された tail segment を Neon Dissolve 演出で fade out
+  // 描画専用：collision / snake 本体ロジックには影響しない
+  // 構成: 細い mint ring + 小さな white-mint glow + 短い diagonal slash + 微小 spark
+  // 時間経過で alpha down + scale down（尻尾がデータ化して消える表現）
+  function drawTrimGhosts() {
+    if (trimGhosts.length === 0) return;
+    ctx.save();
+    for (let i = 0; i < trimGhosts.length; i++) {
+      const g = trimGhosts[i];
+      const t = g.ageMs / TRIM_GHOST_DURATION_MS;   // 0 → 1
+      if (t >= 1) continue;
+      const alpha = Math.max(0, 1 - t);
+      const scale = 1 - t * 0.35;                   // 0.5 秒で 1.0 → 0.65 へ収束
+      const px = g.x * SZ + SZ / 2;
+      const py = g.y * SZ + SZ / 2;
+      const rBase = SZ / 2 - 3;
+      const r = rBase * scale;
+      // (1) 細い mint/cyan の outline ring（主役）
+      ctx.globalAlpha = alpha * 0.7;
+      ctx.strokeStyle = COLOR_TRIM_GHOST_RING;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.stroke();
+      // (2) 中心の小さな white-mint glow（光点程度）
+      ctx.globalAlpha = alpha * 0.55;
+      const glow = ctx.createRadialGradient(px, py, 0, px, py, r * 0.6);
+      glow.addColorStop(0, COLOR_TRIM_GHOST_GLOW);
+      glow.addColorStop(1, 'rgba(168, 255, 240, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(px, py, r * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      // (3) 短い diagonal slash（「削れた」記号、控えめに）
+      ctx.globalAlpha = alpha * 0.6;
+      ctx.strokeStyle = COLOR_TRIM_GHOST_RING;
+      ctx.lineWidth = 1;
+      const slashLen = r * 0.7;
+      ctx.beginPath();
+      ctx.moveTo(px - slashLen, py - slashLen);
+      ctx.lineTo(px + slashLen, py + slashLen);
+      ctx.stroke();
+      // (4) 微小 spark（時間経過で外側にじわっと拡散）
+      ctx.globalAlpha = alpha * 0.65;
+      ctx.fillStyle = COLOR_TRIM_GHOST_SPARK;
+      const sparkOffset = rBase * (0.4 + t * 0.5);
+      ctx.beginPath();
+      ctx.arc(px + sparkOffset * 0.6, py - sparkOffset * 0.6, 0.9, 0, Math.PI * 2);
+      ctx.fill();
     }
-    if (slowEffectMs > 0) {
-      specialStatusEl.textContent = 'SLOW ' + Math.ceil(slowEffectMs / 1000) + 's';
-      specialStatusEl.className = 'special-chip is-slow';
-      specialStatusEl.hidden = false;
-      return;
-    }
-    if (specialFood) {
-      if (specialFood.type === 'slow') {
-        specialStatusEl.textContent = 'SLOW ' + Math.ceil(specialFood.ttlMs / 1000) + 's';
-        specialStatusEl.className = 'special-chip is-slow';
-      } else {
-        specialStatusEl.textContent = 'REBIRTH ' + Math.ceil(specialFood.ttlMs / 1000) + 's';
-        specialStatusEl.className = 'special-chip is-rebirth';
-      }
-      specialStatusEl.hidden = false;
-      return;
-    }
-    specialStatusEl.textContent = '';
-    specialStatusEl.hidden = true;
+    ctx.restore();
   }
 
   function drawSpecialFood() {
@@ -397,32 +538,36 @@
   }
   function devJumpToLevel5() {
     devJumpToLevel(5);
-    if (specialFood) { specialFood = null; updateSpecialStatus(); }
+    if (specialFood) { specialFood = null; updateBuffBar(); }
     if (spawnSpecialFoodForced('slow')) {
       hasSpawnedLevel5IntroSlow = true;
     }
   }
   function devJumpToLevel6() {
     devJumpToLevel(6);
-    if (specialFood) { specialFood = null; updateSpecialStatus(); }
+    if (specialFood) { specialFood = null; updateBuffBar(); }
     spawnSpecialFoodForced('rebirth');
     // Lv5 intro spawn を skip した扱いにし、後で意図せず force spawn しないようにする
     hasSpawnedLevel5IntroSlow = true;
   }
   function devSpawnSlow() {
-    if (specialFood) { specialFood = null; updateSpecialStatus(); }
+    if (specialFood) { specialFood = null; updateBuffBar(); }
     spawnSpecialFoodForced('slow');
   }
   function devSpawnRebirth() {
-    if (specialFood) { specialFood = null; updateSpecialStatus(); }
+    if (specialFood) { specialFood = null; updateBuffBar(); }
     spawnSpecialFoodForced('rebirth');
   }
   function devClearSpecial() {
     specialFood         = null;
     slowEffectMs        = 0;
     rebirthFlashMs      = 0;
+    feverMs             = 0;
+    trimGhosts          = [];
+    comboCount          = 0;
+    comboWindowMs       = 0;
     specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
-    updateSpecialStatus();
+    updateBuffBar();
   }
   function initDevMode() {
     const devPanel = document.getElementById('dev-panel');
@@ -478,11 +623,15 @@
     let normalAte = false;
     if (head.x === food.x && head.y === food.y) {
       normalAte = true;
-      score++;
+      // Phase 6-B / v2.5: Fever 中は Normal Core のみ +2、それ以外は +1
+      const inc = feverMs > 0 ? FEVER_NORMAL_SCORE : 1;
+      const prevScore = score;
+      score += inc;
       if (score > hi) hi = score;
       updateHUD();
       Audio.eat();
-      if (score % 5 === 0) {
+      // Phase 6-B / v2.5: Fever +2 で 5 点境界を跨ぐケース（例: 4→6）でも level up を発火させる
+      if (Math.floor(prevScore / 5) < Math.floor(score / 5)) {
         const prev = lvl;
         lvl = Math.min(lvl + 1, 10);
         speed = Math.max(MIN_SPEED, BASE_SPEED - lvl * 15);
@@ -498,6 +647,13 @@
             }
           }
         }
+      }
+      // Phase 6-B / v2.5: Rebirth Spawn Bias / Combo Charge
+      // level up 判定の後で lvl を見ることで、Lv6 到達したその取得から combo=1 が立つ
+      if (lvl >= COMBO_MIN_LV) {
+        comboCount    = Math.min(comboCount + 1, COMBO_MAX);
+        comboWindowMs = COMBO_WINDOW_MS;
+        updateBuffBar();   // combo >= 2 で COMBO chip が即時表示される
       }
       placeFood();
     }
@@ -517,15 +673,22 @@
     // Phase 6-A / v2.4: 長さ調整
     // - Normal eat        → grow +1 (skip pop)
     // - Slow eat          → grow +1 (skip pop) — 通常 food と同じ growth
-    // - Rebirth eat       → preLen から REBIRTH_TRIM_COUNT 分縮める。
-    //                      MIN_SNAKE_LENGTH 未満にはしない（preLen が小さい時は 3 で頭打ち）
+    // - Rebirth eat       → 通常 pop 1 回（unshift +1 の打ち消し / ghost 対象外）+
+    //                      Rebirth penalty として追加で REBIRTH_TRIM_COUNT 個 pop（ghost 対象）。
+    //                      MIN_SNAKE_LENGTH 未満にはしない
     // - 何も食べていない → normal pop = 据え置き
     const ateAndGrow = normalAte || specialType === 'slow';
     if (!ateAndGrow) {
       if (specialType === 'rebirth') {
-        const preLen = snake.length - 1;   // unshift 前の length
-        const targetLen = Math.max(preLen - REBIRTH_TRIM_COUNT, MIN_SNAKE_LENGTH);
-        while (snake.length > targetLen) snake.pop();
+        // (1) 通常移動相当の pop（unshift +1 を打ち消す / ghost には含めない）
+        if (snake.length > MIN_SNAKE_LENGTH) snake.pop();
+        // (2) Rebirth penalty として追加で REBIRTH_TRIM_COUNT 個だけ縮める（ghost 対象）
+        const targetLen = Math.max(snake.length - REBIRTH_TRIM_COUNT, MIN_SNAKE_LENGTH);
+        while (snake.length > targetLen) {
+          const tail = snake[snake.length - 1];
+          trimGhosts.push({ x: tail.x, y: tail.y, ageMs: 0 });
+          snake.pop();
+        }
       } else {
         snake.pop();   // 通常の steady-state pop
       }
@@ -629,6 +792,8 @@
     ctx.arc(fx - r * 0.35, fy - r * 0.35, r * 0.3, 0, Math.PI * 2);
     ctx.fill();
 
+    // Phase 6-B / v2.5 UX: Rebirth tail ghost を snake 本体の後・specialFood より前に描画
+    drawTrimGhosts();
     // Phase 6-A: Special Food 描画（Normal Core より後ろに描画）
     drawSpecialFood();
   }
@@ -662,12 +827,18 @@
     setState('over');
     clearLevelFlash();
     // Phase 6-A: 死亡時に Special Food / 効果 / chip を完全リセット
+    // Phase 6-B / v2.5: Fever 残時間も同タイミングでリセット
+    // Phase 6-B / v2.5 UX: trim ghost も死亡時に完全消去（残留させない）
     specialFood         = null;
     slowEffectMs        = 0;
     rebirthFlashMs      = 0;
+    feverMs             = 0;
+    trimGhosts          = [];
+    comboCount          = 0;
+    comboWindowMs       = 0;
     specialSpawnDelayMs = SPECIAL_FOOD_SPAWN_DELAY_MS;
     hasSpawnedLevel5IntroSlow = false;
-    updateSpecialStatus();
+    updateBuffBar();
     drawGameOverOverlay();
     Audio.stop();
     Audio.over();

@@ -272,4 +272,80 @@ ECC hooks は `templates/.claude/settings.json` には入れない。
 - 初期実装では Rebirth Core の snake.length -1 が弱く感じられたため、実機確認後に snake.length -3 へ調整
 - Lv6以降でRebirthの価値を高めるため、Slow / Rebirth 抽選比率を 40 / 60 に調整
 - Special Foodの出現頻度を 14秒間隔 / 55% 確率、失敗時4秒retry に調整
+
+### Phase 6-B / v2.5
+
+#### 変更ファイル
+
+- `frontend/index-v2.html`
+- `frontend/css/style-v2.css`
+- `frontend/js/snake-v2.js`
+
+#### 変更しなかったファイル
+
+- `frontend/js/audio-v2.js`
+- `frontend/js/api.js`
+- `backend/`
+- `infrastructure/`
+- Ranking API
+- Score登録API
+- GitHub Actions
+- v2.1 rollback files
+  - `frontend/index.html`
+  - `frontend/css/style.css`
+  - `frontend/js/snake.js`
+- v2.3 rollback snapshot files
+  - `frontend/index-v2.3.html`
+  - `frontend/css/style-v2.3.css`
+  - `frontend/js/snake-v2.3.js`
+  - `frontend/js/audio-v2.3.js`
+
+#### 実装内容
+
+- Rebirth Fever Mode
+  - Rebirth Core 取得時に Fever Mode を 6 秒間付与
+  - Fever 中に Normal Core を取得した場合のみ score +2
+  - Slow Core / Rebirth Core 自体は倍率対象外
+  - Rebirth Core 再取得時は Fever 時間を 6 秒にリセット(加算しない)
+  - Slow と Fever は独立タイマーで同時存在可能
+  - score +2 による 5 点境界跨ぎの level up に対応
+- Buff Bar UX
+  - 旧 special-status chip(単一表示・優先順位切替)を廃止
+  - HUD と canvas の間に Buff Bar を新設し、FEVER / SLOW / REBIRTH / PICKUP / COMBO を独立 chip として並列表示
+  - PICKUP chip は `PICKUP: SLOW Ns` / `PICKUP: REBIRTH Ns` の prefix 付きで active buff と区別
+  - 固定 min-height で予約領域確保、layout shift ゼロ
+  - モバイル幅は 5 chip 折返しを 2 段分の min-height で事前予約
+- Rebirth Tail Highlight
+  - Rebirth Core 取得時、削除された tail segment を trim ghost として描画
+  - 描画専用で collision / snake 本体ロジックには影響しない
+  - Neon Dissolve 風(細い mint ring + 内側 white-mint glow + 短い diagonal slash + 微小 spark)で 0.5 秒 fade out + scale down
+- Rebirth Spawn Bias / Combo Charge
+  - Lv6 以上で有効
+  - Normal Core を 3 秒以内に連続取得すると comboCount が上昇(上限 5)
+  - 次回 specialFood 抽選時の Rebirth 出現率を `min(0.6 + comboCount × 0.05, 0.85)` に加算
+  - combo ≥ 2 のときだけ COMBO chip を表示
+  - specialFood 取得 / TTL 切れ / gameOver / retry / Dev Clear Special で combo reset
+  - spawn 抽選失敗のみでは combo は維持
+  - specialFood の spawn delay / retry delay / TTL / spawn probability は変更せず、Lv6+ の type selection のみへの bias
+
+#### 実機確認結果
+
+- PC確認済み
+- スマホ確認済み
+- D-pad / スワイプ操作に問題なし
+- Buff Bar 表示確認済み
+- FEVER / SLOW / REBIRTH / PICKUP / COMBO chip 表示確認済み
+- Rebirth Tail Highlight 視認性調整済み
+- Combo Charge による Rebirth 出現率調整確認済み
+- pause / resume / tab復帰 / gameOver / retry の timer 暴走なし
+
+#### 発生した問題と対応
+
+- Buff Bar が表示されないように見えたが、ハードリロード後に表示確認。ブラウザキャッシュ起因と判断
+- HUD / Buff Bar / canvas 間隔が広かったため、`#buff-bar` の margin / min-height をCSSで調整
+- Tail Highlight が派手すぎたため、Neon Dissolve 風に調整
+- Rebirth length -3 が -4 に見える問題を調査し、trim ghost / length 処理を修正・確認済み
+  - 原因: Rebirth pop ループの 1 回目が `unshift +1` の打ち消し(通常移動相当)であり、本来 ghost に含めるべきでなかった
+  - 対応: 「通常 pop 1 回(ghost なし) + Rebirth penalty 最大 3 回(ghost あり)」に分離し、ghost 個数を 3 個に修正
+- Lv6以降の Rebirth Core 出現率が低く感じたため、Combo Charge による Rebirth Spawn Bias を追加
 - これにより、高レベル帯で高得点を狙いやすい戦略性を追加

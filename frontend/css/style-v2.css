@@ -889,11 +889,19 @@ body {
 .dev-panel button:hover  { background: rgba(255, 200, 0, 0.15); }
 .dev-panel button:active { transform: scale(0.95); }
 
-/* ===== Phase 6-A: Special Food HUD chip ===== */
-.special-chip {
+/* ===== Phase 6-B / v2.5: Active Buff Bar（HUD と canvas の間に固定高さで配置） ===== */
+#buff-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;          /* layout shift 防止：chip 全 hidden でも領域を予約（圧縮版） */
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.buff-chip {
   display: inline-block;
-  align-self: center;
-  margin-top: 4px;
   padding: 3px 12px;
   font-size: 11px;
   font-weight: 700;
@@ -903,19 +911,38 @@ body {
   text-shadow: 0 0 6px currentColor;
   transition: opacity 0.2s ease;
 }
-.special-chip[hidden] { display: none; }
-.special-chip.is-slow {
+.buff-chip[hidden] { display: none; }
+.buff-chip.is-fever {
+  color: #ffe79a;
+  background: rgba(255, 200, 64, 0.18);
+  border: 1px solid rgba(255, 200, 64, 0.55);
+}
+.buff-chip.is-slow {
   color: #ffd5a0;
   background: rgba(255, 155, 61, 0.18);
   border: 1px solid rgba(255, 155, 61, 0.5);
 }
-.special-chip.is-rebirth {
+.buff-chip.is-rebirth {
   color: #c8ffdb;
   background: rgba(127, 255, 175, 0.15);
   border: 1px solid rgba(127, 255, 175, 0.5);
 }
+/* PICKUP: フィールド上の specialFood TTL hint（active buff と明確に色で区別） */
+.buff-chip.is-pickup {
+  color: #b8d8ff;
+  background: rgba(80, 160, 255, 0.14);
+  border: 1px solid rgba(80, 160, 255, 0.45);
+}
+/* COMBO: Normal Core 連続取得による Rebirth bias 状態（紫系で他 chip と区別） */
+.buff-chip.is-combo {
+  color: #e0c8ff;
+  background: rgba(180, 120, 255, 0.16);
+  border: 1px solid rgba(180, 120, 255, 0.5);
+}
 @media (max-width: 480px) {
-  .special-chip { font-size: 10px; padding: 2px 10px; }
+  /* モバイルは 5 chip 折返し前提で 2 段分を予約（PC は 1 段のまま自然な間隔を維持） */
+  #buff-bar { min-height: 44px; gap: 4px; margin-top: 0; margin-bottom: 0; }
+  .buff-chip { font-size: 10px; padding: 2px 10px; }
 }
 
 /* ===== backdrop-filter 非対応環境向け fallback ===== */
