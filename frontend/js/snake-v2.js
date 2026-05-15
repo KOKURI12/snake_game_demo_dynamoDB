@@ -15,6 +15,12 @@
   const W = COLS * SZ, H = ROWS * SZ;
   const BASE_SPEED = 180, MIN_SPEED = 60;
 
+  // Phase 6-B / v2.5.2: Level Threshold Curve
+  // index N = Lv(N+1) に到達するために必要な累計 score
+  // Lv1〜Lv5 までは旧仕様（5 点ごと）、Lv6 以降は段階的に重くして
+  // Rebirth Charge / Fever / Combo を活用する時間を確保する
+  const LEVEL_THRESHOLDS = [0, 5, 10, 15, 20, 25, 35, 50, 70, 95];
+
   const COLOR_BG    = '#fafffa';
   const COLOR_GRID  = '#e0ebe0';
   const COLOR_FOOD  = '#ef5350';
@@ -267,6 +273,30 @@
   // Phase 6-B / v2.5.1: Rebirth Charge が READY 状態か判定（Lv6+ かつ steps が上限到達）
   function isRebirthReady() {
     return lvl >= REBIRTH_CHARGE_MIN_LV && rebirthChargeSteps >= REBIRTH_CHARGE_MAX_STEPS;
+  }
+
+  // Phase 6-B / v2.5.2: score 更新後に呼んで、必要なら 1 段 level up する共通関数
+  // Normal Core / Slow Core / Rebirth Core のどの取得経路からも呼べるよう切り出し済み
+  // 現在の最大加点は Fever +2 までなので 1 段ずつの if 判定で十分（飛び級は起きない）。
+  // 将来 +3 以上の score bonus を導入する場合は while ループ化が必要。
+  function applyLevelUpIfNeeded() {
+    if (lvl < LEVEL_THRESHOLDS.length && score >= LEVEL_THRESHOLDS[lvl]) {
+      const prev = lvl;
+      lvl = lvl + 1;
+      speed = Math.max(MIN_SPEED, BASE_SPEED - lvl * 15);
+      levelEl.textContent = String(lvl);
+      if (lvl !== prev) {
+        triggerLevelFlash();
+        // Phase 5-A: Level 連動 BPM（Micro Ramp で 30% 即時 + 残り ease）
+        Audio.setLevel(lvl);
+        // Phase 6-A: Lv5 到達時に Slow Core を 1 回だけ 100% force spawn（intro 体験用）
+        if (lvl === SLOW_MIN_LV && !hasSpawnedLevel5IntroSlow && !specialFood) {
+          if (spawnSpecialFoodForced('slow')) {
+            hasSpawnedLevel5IntroSlow = true;
+          }
+        }
+      }
+    }
   }
 
   /* ── Phase 6-A: Special Food ── */
@@ -573,9 +603,11 @@
 
   /* ── Phase 6-A Dev Mode（?dev=1 で有効化、検証専用） ── */
   function devJumpToLevel(targetLvl) {
-    score = (targetLvl - 1) * 5;
+    // Phase 6-B / v2.5.2: LEVEL_THRESHOLDS から逆引き（旧 (targetLvl - 1) * 5 は固定式依存だったため廃止）
+    const clampedLvl = Math.max(1, Math.min(targetLvl, 10));
+    score = LEVEL_THRESHOLDS[clampedLvl - 1] ?? 0;
     if (score > hi) hi = score;
-    lvl   = Math.max(1, Math.min(targetLvl, 10));
+    lvl   = clampedLvl;
     speed = Math.max(MIN_SPEED, BASE_SPEED - lvl * 15);
     updateHUD();
     if (levelEl) levelEl.textContent = String(lvl);
@@ -671,29 +703,12 @@
       normalAte = true;
       // Phase 6-B / v2.5: Fever 中は Normal Core のみ +2、それ以外は +1
       const inc = feverMs > 0 ? FEVER_NORMAL_SCORE : 1;
-      const prevScore = score;
       score += inc;
       if (score > hi) hi = score;
       updateHUD();
       Audio.eat();
-      // Phase 6-B / v2.5: Fever +2 で 5 点境界を跨ぐケース（例: 4→6）でも level up を発火させる
-      if (Math.floor(prevScore / 5) < Math.floor(score / 5)) {
-        const prev = lvl;
-        lvl = Math.min(lvl + 1, 10);
-        speed = Math.max(MIN_SPEED, BASE_SPEED - lvl * 15);
-        levelEl.textContent = String(lvl);
-        if (lvl !== prev) {
-          triggerLevelFlash();
-          // Phase 5-A: Level 連動 BPM（Micro Ramp で 30% 即時 + 残り ease）
-          Audio.setLevel(lvl);
-          // Phase 6-A: Lv5 到達時に Slow Core を 1 回だけ 100% force spawn（intro 体験用）
-          if (lvl === SLOW_MIN_LV && !hasSpawnedLevel5IntroSlow && !specialFood) {
-            if (spawnSpecialFoodForced('slow')) {
-              hasSpawnedLevel5IntroSlow = true;
-            }
-          }
-        }
-      }
+      // Phase 6-B / v2.5.2: LEVEL_THRESHOLDS による段階的 level up（共通関数に集約）
+      applyLevelUpIfNeeded();
       // Phase 6-B / v2.5: Rebirth Spawn Bias / Combo Charge + v2.5.1: Rebirth Charge
       // level up 判定の後で lvl を見ることで、Lv6 到達したその取得から combo=1 / charge=1 が立つ
       // updateBuffBar() は両者の更新後に末尾で 1 回だけ呼び、無駄な再描画を抑える
@@ -720,6 +735,10 @@
       updateHUD();
       Audio.eat();
       applySpecialFoodEffect(specialType);
+      // Phase 6-B / v2.5.2: Slow / Rebirth 取得時の score +1 も threshold を跨ぐ可能性があるため
+      // 共通関数で level up 判定を行う（Slow/Rebirth は Lv5/Lv6 以降出現なので Lv1〜4 経路は通常通らないが、
+      // 累積 score で threshold に届くケースを正しく扱うため必ず呼ぶ）
+      applyLevelUpIfNeeded();
       // Phase 6-B / v2.5.1: Rebirth Core を実際に取得した時のみ Charge を reset
       // Slow Core 取得 / TTL 切れ / spawn 失敗では Charge を維持（仕様通り）
       if (specialType === 'rebirth') {
